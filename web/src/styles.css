@@ -1,0 +1,72 @@
+:root {
+  color: oklch(0.22 0.025 270);
+  background: oklch(0.97 0.008 270);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --app-bg: oklch(0.97 0.008 270);
+  --app-ink: oklch(0.22 0.025 270);
+  --app-muted: oklch(0.49 0.025 270);
+  --app-border: oklch(0.9 0.016 270);
+  --app-primary: oklch(0.43 0.14 270);
+  --app-success: oklch(0.4 0.09 175);
+  --app-warning: oklch(0.47 0.12 65);
+  --app-danger: oklch(0.45 0.16 20);
+}
+
+* { box-sizing: border-box; }
+body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--app-ink); }
+button, input, select, textarea { font: inherit; }
+:focus-visible { outline: 2px solid var(--app-primary); outline-offset: 2px; }
+
+.app-layout { min-height: 100vh; background: var(--app-bg); }
+.app-header { display: flex; align-items: center; justify-content: space-between; height: 64px; padding-inline: max(24px, calc((100vw - 1160px) / 2)); border-bottom: 1px solid var(--app-border); }
+.app-header .ant-btn { flex: none; }
+.brand { min-width: 0; }
+.brand-mark { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border-radius: 7px; background: var(--app-primary); color: #fff; font-weight: 750; }
+.app-content { width: min(1160px, calc(100% - 48px)); margin: 0 auto; padding: 34px 0 20px; }
+.page-heading { margin-bottom: 24px; }
+.page-heading .ant-typography-secondary { display: block; margin-top: 6px; }
+.workspace-grid { margin-bottom: 24px; }
+.workspace-card { height: 100%; }
+.workspace-card .ant-card-head-title { font-weight: 650; }
+.workspace-card .ant-form-item:last-of-type { margin-bottom: 12px; }
+.workspace-card .ant-alert { margin-bottom: 16px; }
+.workspace-card .ant-form > .ant-btn { margin-top: 2px; }
+.model-picker { margin: 0 0 20px; }
+.model-picker-heading { margin-bottom: 8px; }
+.model-picker .ant-list { max-height: 220px; overflow: auto; }
+.model-picker .ant-list-item { padding-block: 8px; }
+.history-card { margin-bottom: 20px; }
+.results-card { margin-top: 4px; }
+.results-card > .ant-card-body > .ant-alert { margin-bottom: 16px; }
+.result-meta { margin-bottom: 16px; }
+.result-summary { align-items: center; padding: 14px 0 18px; }
+.model-results .ant-list-item { display: block; padding: 18px 0; }
+.model-results .ant-list-item:last-child { border-block-end: 0; }
+.model-result-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.model-result-header h4.ant-typography { margin: 0 0 3px; overflow-wrap: anywhere; }
+.model-result > .ant-alert { margin-bottom: 12px; }
+.model-result > .ant-collapse { width: 100%; }
+.status-icon-passed { color: var(--app-success); }
+.status-icon-failed { color: var(--app-warning); }
+.status-icon-error { color: var(--app-danger); }
+.check-evidence pre { overflow-wrap: anywhere; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, monospace; line-height: 1.65; }
+.app-footer { padding: 16px 24px 28px; color: var(--app-muted); text-align: center; font-size: 12px; }
+
+.auth-shell { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: var(--app-bg); }
+.auth-card { width: min(440px, 100%); }
+.auth-card .brand { margin-bottom: 4px; }
+.auth-card h1.ant-typography { margin: 0 0 8px; font-size: 25px; }
+.auth-card .ant-typography-secondary { line-height: 1.7; }
+.auth-card .auth-note { display: block; }
+
+@media (max-width: 760px) {
+  .app-header { height: 58px; padding-inline: 16px; }
+  .app-content { width: calc(100% - 32px); padding-top: 24px; }
+  .app-header .brand > .ant-typography-secondary { display: none; }
+  .result-summary { align-items: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
