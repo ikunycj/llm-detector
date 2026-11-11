@@ -92,8 +92,14 @@ type diskProject struct {
 	AccessToken string            `json:"access_token"`
 	Keys        map[string]string `json:"keys"`
 }
-type state struct {
+type State struct {
 	Version  int                    `json:"version"`
 	Projects map[string]diskProject `json:"projects"`
 	Runs     []Run                  `json:"runs"`
 }
+
+// state remains an alias for existing internal implementations.
+type state = State
+type Store interface{ Save(State) error }
+
+func EmptyState() State { return State{Version: 1, Projects: map[string]diskProject{}, Runs: []Run{}} }

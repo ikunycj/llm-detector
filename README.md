@@ -1,8 +1,8 @@
 # LLM Detector
 
-Go + React 的模型智力检测 / 巡检项目。用户通过部署访问密钥登录，输入厂商（协议适配器）、API URL 和 API Key，对全部或指定模型执行检测并查看结果。
+Go + React 的模型智力检测 / 巡检项目。顶部支持本地与云端两种模式：本地无需登录，数据保存在浏览器；云端使用账号密码登录，数据按账号保存到服务器 SQLite。每个巡检引擎还可以单独选择本地或云端执行。
 
-项目已具备可运行的基础闭环。内置 **OpenAI Chat Completions / OpenAI Responses / Anthropic Messages 协议**、**smoke 基础检查**，并接入官方 **Fingerpoint Detector Go SDK** 用于模型指纹候选识别。Smoke 检查用于接入和回归；Fingerpoint 使用随机整数输出进行参考库候选排序；两者都不是通用智力评分。
+项目已具备可运行的基础闭环。内置 **OpenAI Chat Completions / OpenAI Responses / Anthropic Messages 协议**，并接入 **Fingerpoint** 和 **Terminal Bench** 两个巡检引擎。Fingerpoint 使用随机整数输出进行参考库候选排序；Terminal Bench 使用 Harbor / Terminus-2 执行终端任务；两者都不是通用智力评分。
 
 ## 项目巡检任务
 
@@ -23,7 +23,13 @@ Go + React 的模型智力检测 / 巡检项目。用户通过部署访问密钥
 - **指定模型可以直接运行**：手动输入模型 ID，不强制依赖 `/models`。`scope=all` 才会在任务执行时重新发现全部模型。
 - **结果区分错误类型**：检查状态为 `passed`、`failed`、`error`。模型回答未通过与接口调用失败分开统计。
 - **模型指纹检测**：独立“指纹检测”页面支持 OpenAI Responses、Chat Completions 与 Anthropic Messages 协议，展示挑战样本、候选排名与参考库概率。
-- **简单共享密钥登录**：部署密钥来自 `APP_LOGIN_KEY`；服务发放有 TTL、可注销的随机 Bearer 会话。浏览器只在内存保留令牌，刷新需要重新登录。
+- **本地 / 云端分离**：本地无需登录，使用浏览器和本机执行器；页面自动探测执行器，点击一次即可建立本地会话；云端使用账号密码，业务数据保存到按账号隔离的 SQLite。
+
+## 本地与云端模式
+
+默认进入本地模式，不需要登录。配置、项目和历史保存在浏览器。Fingerpoint 本地执行时由浏览器直接调用模型 API，不需要本机执行器；Terminal Bench 本地执行时才需要本机 Docker、Git、Python 3.12 和 Harbor。每个引擎单独选择执行位置。完整说明见 [本地与云端模式](docs/local-cloud.md)。
+
+云端模式使用 `CLOUD_ADMIN_USERNAME` / `CLOUD_ADMIN_PASSWORD` 创建初始账号，账号、会话和业务数据保存到 `DATA_DIR/cloud.sqlite`，模型 Key 加密保存。创建其他账号：`printf '%s\n' 'your-password' | go run ./cmd/user -username user`。密码不会被输出或写入命令行参数。不做旧数据迁移。
 
 ## 本地启动
 
@@ -36,7 +42,7 @@ make install
 make init-env
 ```
 
-`make init-env` 会在缺少 `.env` 时从模板创建文件，并生成随机开发登录密钥；文件权限设为当前用户可读写，`.env` 已加入 Git 忽略规则。密钥不会输出到终端。若已有 `.env` 和自定义密钥，该目标会保留它们。
+`make init-env` 会在缺少 `.env` 时从模板创建文件，并生成云端初始账号密码；文件权限设为当前用户可读写，`.env` 已加入 Git 忽略规则。密钥不会输出到终端。若已有 `.env` 和自定义密钥，该目标会保留它们。
 
 分别在两个终端启动后端与前端：
 
@@ -48,7 +54,7 @@ make backend
 make frontend
 ```
 
-Go 后端每次启动都会直接读取项目根目录 `.env` 中的 `APP_LOGIN_KEY`。shell 中同名环境变量不会覆盖登录密钥，因此 `go run ./cmd/server` 和构建后的 `./bin/server` 也必须从项目根目录启动并使用同一份 `.env`。`make backend` 与 `make frontend` 都会先确保开发 `.env` 存在。
+Go 后端启动时会读取项目根目录 `.env` 中的云端初始账号配置；新 SQLite 初始化后可使用 `go run ./cmd/user -username <name>` 创建账号。`make backend` 与 `make frontend` 都会先确保开发 `.env` 存在。
 
 打开 `http://127.0.0.1:9000`。Vite 将 `/api` 和 `/healthz` 代理到 `127.0.0.1:9001`，前端无需配置 API 地址或 CORS。修改后端端口时，同步修改 `web/vite.config.ts` 的代理目标。
 
@@ -56,13 +62,24 @@ Go 后端每次启动都会直接读取项目根目录 `.env` 中的 `APP_LOGIN_
 
 使用流程：
 
-1. 输入 `APP_LOGIN_KEY` 登录。
-2. 输入完整 API 根地址（如 `https://api.example.com/v1`）和模型服务 API Key。
-3. 可选“发现可用模型”；也可直接在“指定模型”中输入 ID。
-4. 选择检测引擎并开始巡检。全部模型模式会向列表中的每个模型发起实际请求并消耗额度。
+1. 默认进入「本地」模式，无需登录；如选择「云端」，输入账号密码。
+2. 在顶部「模型 API」栏目添加配置，填写名称、请求协议、API Base URL 和 API Key。支持逐项添加，也可通过「批量导入」读取或粘贴 JSON 数组。
+3. 为每项 API 独立选择「指定模型」或「全部模型」。指定模型可手动输入 ID 或点击「发现可用模型」选择；全部模型在每次开始巡检时重新发现。
+4. 在列表选择一项 API，再选择一个或多个检测引擎，并为每个引擎选择本地或云端执行后开始巡检。全部模型模式会向列表中的每个模型发起实际请求并消耗额度。
 5. 查看逐模型进度，展开检查项查看输出或错误。也可选择本次服务运行期间的历史任务。
 
-模型服务支持“保存到本机”：服务名称、协议适配器、Base URL 和 API Key 会写入当前浏览器的 `localStorage`，下次打开页面可直接选择。保存项只存在当前浏览器，不会写入后端任务存储；由于 API Key 是本地明文存储，只建议在个人受信任设备上使用。
+模型 API 的名称、协议、Base URL、API Key、巡检范围和模型 ID 均写入当前浏览器的 `localStorage`，下次打开页面可直接选择。配置仅保存在当前浏览器本地，不会同步到其他设备；执行发现或巡检时才发送连接信息给后端。API Key 在本地明文保存，仅建议在可信设备使用，清理浏览器数据会删除配置。旧版连接配置继续保留，未保存过模型范围的项需要补充指定模型，不会自动升级为全量巡检。
+
+批量导入格式（`protocol` 支持 `chat_completions`、`responses`、`messages`）：
+
+```json
+[
+  {"name":"研发 API","protocol":"responses","base_url":"https://api.example.com/v1","api_key":"your-key","scope":"selected","models":["model-a"]},
+  {"name":"备用 API","protocol":"messages","base_url":"https://api.example.org/v1","api_key":"your-key","scope":"all","models":[]}
+]
+```
+
+文件在浏览器内解析，不上传；检查通过并确认后追加到已有配置。批量数据任一项无效时整批不导入，不会静默丢弃配置。
 
 巡检引擎支持一次选择多个引擎。Terminal Bench 可在设置中选择日常 6 题或完整 89 题、题目并发数；每个渠道的模型依次使用已导入的 Key 创建 Harbor 任务。提交后每个引擎创建独立任务，结果页把每个模型/引擎任务展平为列表，可按模型名或 ID、模型服务、巡检引擎、任务状态筛选。Fingerpoint 在“全部模型”模式下会先发现模型，再为每个模型创建指定模型指纹任务。
 

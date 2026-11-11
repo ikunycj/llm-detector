@@ -44,7 +44,7 @@ type ModelResult struct {
 }
 
 type Store interface {
-	Save(Scan)
+	Save(Scan) error
 	Get(string) (Scan, error)
-	List() []Scan
+	List() ([]Scan, error)
 }

@@ -1,8 +1,9 @@
+import { readModelServices, type APIClient, type ExecutionLocation } from '../../api'
 import { CodeOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Col, Descriptions, Empty, Form, Input, InputNumber, Layout, List, Popconfirm, Progress, Radio, Row, Select, Space, Table, Tag, Typography } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, cancelBenchJob, createBenchJob, getBenchCatalog, getBenchJobs, getBenchReadiness, logout } from '../../api'
-import { readSavedServices, type SavedModelService } from '../scans/savedServices'
+import { type SavedModelService } from '../scans/savedServices'
 import type { BenchCatalog, BenchInput, BenchJob, BenchReadiness } from './types'
 
 const { Content, Footer } = Layout
@@ -20,10 +21,12 @@ const jobLabel = (status: string) => status === 'failed' ? '运行失败' : labe
 const date = (value?: string) => value ? new Date(value).toLocaleString('zh-CN') : '—'
 const terminal = (status: string) => !['running', 'cancelling'].includes(status)
 
-export default function TerminalBenchPage({ token, onExpired }: { token: string; onExpired: () => void }) {
+export default function TerminalBenchPage({ token, localClient, cloudClient, onExpired }: { token: APIClient; localClient: APIClient; cloudClient: APIClient; onExpired: (location?: ExecutionLocation) => void }) {
   const [form] = Form.useForm<BenchInput>()
   const suite = Form.useWatch('suite', form) || 'daily'
+  const savedServiceID = Form.useWatch('service_id', form)
   const [catalog, setCatalog] = useState<BenchCatalog>()
+  const [execution, setExecution] = useState<ExecutionLocation>(token.mode === 'cloud' ? 'cloud' : 'local')
   const [readiness, setReadiness] = useState<BenchReadiness>()
   const [checking, setChecking] = useState(false)
   const [jobs, setJobs] = useState<BenchJob[]>([])
@@ -34,16 +37,20 @@ export default function TerminalBenchPage({ token, onExpired }: { token: string;
   const [query, setQuery] = useState('')
   const job = jobs.find((item) => item.id === jobID) || jobs[0]
   const active = jobs.some((item) => !terminal(item.status))
-  const reportError = useCallback((err: unknown) => {
-    if (err instanceof ApiError && err.status === 401) { onExpired(); return }
+  const reportError = useCallback((err: unknown, location: ExecutionLocation = execution) => {
+    if (err instanceof ApiError && err.status === 401) { onExpired(location); return }
     setError(err instanceof Error ? err.message : '操作失败')
-  }, [onExpired])
+  }, [execution, onExpired])
+
+  useEffect(() => {
+    setExecution(token.mode === 'cloud' ? 'cloud' : 'local')
+  }, [token.mode])
 
   useEffect(() => {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout>
     getBenchCatalog(token, controller.signal).then(setCatalog).catch((err: unknown) => { if (!controller.signal.aborted) reportError(err) })
-    try { setServices(readSavedServices()) } catch (err) { reportError(err) }
+    readModelServices(token).then(setServices).catch(reportError)
     async function poll() {
       try { const response = await getBenchJobs(token, controller.signal); if (!controller.signal.aborted) setJobs(response.jobs) }
       catch (err) { if (!controller.signal.aborted) reportError(err) }
@@ -55,20 +62,25 @@ export default function TerminalBenchPage({ token, onExpired }: { token: string;
 
   async function check() {
     setChecking(true); setError('')
-    try { setReadiness(await getBenchReadiness(token)) } catch (err) { reportError(err) } finally { setChecking(false) }
+    try { const client = execution === 'local' ? localClient : cloudClient; if (execution === 'cloud' && !cloudClient.token) throw new Error('云端执行需要先登录云端。'); setReadiness(await getBenchReadiness(client)) } catch (err) { reportError(err, execution) } finally { setChecking(false) }
   }
   async function start(input: BenchInput) {
     setBusy('start'); setError('')
     try {
-      const result = await createBenchJob(token, input)
+      const selected = services.find((service) => service.id === input.service_id)
+      if (execution === 'cloud' && !cloudClient.token) throw new Error('云端执行需要先登录云端。')
+      if (execution === 'local' && selected?.source === 'cloud') throw new Error('云端保存的 API Key 不会回传浏览器，不能选择本地执行。')
+      const client = execution === 'local' ? localClient : cloudClient
+      const request: BenchInput = { ...input, service_id: execution === 'cloud' && selected?.source === 'cloud' ? selected.id : undefined, service_name: selected?.name || input.service_name, base_url: selected?.base_url || input.base_url, api_key: selected?.api_key || input.api_key, protocol: selected?.protocol || input.protocol }
+      const result = await createBenchJob(client, request)
       setJobs((current) => [result, ...current]); setJobID(result.id)
       form.setFieldValue('api_key', '')
-    } catch (err) { reportError(err) } finally { setBusy('') }
+    } catch (err) { reportError(err, execution) } finally { setBusy('') }
   }
   async function cancel() {
     if (!job) return
     setBusy('cancel'); setError('')
-    try { await cancelBenchJob(token, job.id); const response = await getBenchJobs(token); setJobs(response.jobs) }
+    try { const client = job.source === 'cloud' ? cloudClient : localClient; await cancelBenchJob(client, job.id); const response = await getBenchJobs(client); setJobs(response.jobs) }
     catch (err) { reportError(err) } finally { setBusy('') }
   }
   const selectedNames = catalog ? suite === 'daily' ? catalog.daily : catalog.tasks.map((task) => task.name) : []
@@ -82,18 +94,20 @@ export default function TerminalBenchPage({ token, onExpired }: { token: string;
       <div className="page-heading"><Title level={1}><CodeOutlined /> Terminal Bench</Title><Text type="secondary">在 Docker 任务环境中运行 Terminus-2 agent，再执行官方 verifier。</Text></div>
       {error && <Alert type="error" title={error} showIcon closable onClose={() => setError('')} />}
       <Alert type="info" showIcon title="固定 Terminal-Bench 2.0 · 完整 89 题 / 日常 6 题" description="两套测试使用同一数据集提交和 Harbor 0.25.0。日常集适合固定配置的重复对比，不能替代完整测试集成绩；结果同时受模型、agent 与运行环境影响。" />
-      <Card size="small" title="运行环境" extra={<Button icon={<ReloadOutlined />} loading={checking} onClick={() => void check()}>检查环境</Button>}>
+      <Card size="small" title={<Space>运行环境 <Tag color={execution === 'cloud' ? 'blue' : 'default'}>{execution === 'cloud' ? '云端执行' : '本地执行'}</Tag></Space>} extra={<Button icon={<ReloadOutlined />} loading={checking} onClick={() => void check()}>检查环境</Button>}>
         {readiness ? <Space wrap>{readiness.checks.map((item) => <Tag key={item.name} color={item.ready ? 'success' : 'error'}>{item.name}：{item.detail}</Tag>)}</Space> : <Text type="secondary">首次运行前检查 Harbor、Docker 与 Docker Compose。可选依赖安装命令：<Text code>make terminal-bench-install</Text></Text>}
       </Card>
       <Row gutter={[20, 20]} className="terminal-bench-grid">
         <Col xs={24} lg={11}>
           <Card title="测试配置">
-            <Form form={form} layout="vertical" requiredMark={false} disabled={Boolean(busy) || active} initialValues={{ suite: 'daily', service_name: '', protocol: 'chat_completions', concurrency: 1 }} onFinish={start}>
-              <Form.Item label="使用本机已保存服务"><Select allowClear placeholder="可选，也可直接填写" options={services.map((service) => ({ value: service.id, label: service.name }))} onChange={(id) => { const service = services.find((item) => item.id === id); if (service) form.setFieldsValue({ service_name: service.name, base_url: service.base_url, api_key: service.api_key, protocol: service.protocol }) }} /></Form.Item>
+            <Form form={form} layout="vertical" requiredMark={false} disabled={Boolean(busy) || active} initialValues={{ suite: 'daily', service_name: '', protocol: 'chat_completions', concurrency: 1, execution: token.mode === 'cloud' ? 'cloud' : 'local' }} onFinish={start}>
+              <Form.Item name="execution" label="执行位置"><Select value={execution} onChange={setExecution} options={[{ value: 'local', label: '本机 Harbor', disabled: false }, { value: 'cloud', label: '云端 Harbor', disabled: !cloudClient.token }]} /></Form.Item>
+              {execution === 'cloud' && <Alert type="info" showIcon title="本次 Terminal Bench 将在云端执行" description="云端 Harbor 会运行任务并保存结果；本地 Harbor 需要本机执行器和 Docker。" />}
+              <Form.Item label="选择模型 API"><Select allowClear placeholder="可选，也可直接填写" options={services.map((service) => ({ value: service.id, label: `${service.name} · ${service.source === 'cloud' ? '云端' : '本地'}` }))} onChange={(id) => { const service = services.find((item) => item.id === id); if (!service) { form.setFieldValue('service_id', undefined); return }; form.setFieldsValue({ service_id: service.id, service_name: service.name, base_url: service.base_url, api_key: service.api_key, protocol: service.protocol }) }} /></Form.Item>
               <Form.Item name="service_name" label="服务名称"><Input placeholder="用于区分测试记录" /></Form.Item>
-              <Form.Item name="base_url" label="API Base URL" rules={[{ required: true }, { type: 'url' }]}><Input placeholder="https://api.example.com/v1" autoComplete="off" /></Form.Item>
-              <Form.Item name="api_key" label="模型 API Key" rules={[{ required: true }]}><Input.Password autoComplete="off" /></Form.Item>
-              <Form.Item name="protocol" label="协议"><Select options={[{ value: 'chat_completions', label: 'OpenAI Chat Completions' }, { value: 'responses', label: 'OpenAI Responses' }, { value: 'messages', label: 'Anthropic Messages' }]} /></Form.Item>
+              <Form.Item name="base_url" label="API Base URL" rules={[{ required: true }, { type: 'url' }]}><Input disabled={Boolean(savedServiceID)} placeholder="https://api.example.com/v1" autoComplete="off" /></Form.Item>
+              <Form.Item name="service_id" hidden><Input /></Form.Item><Form.Item name="api_key" label="模型 API Key" rules={[{ required: !savedServiceID }]}><Input.Password autoComplete="off" disabled={Boolean(savedServiceID) && execution === 'cloud'} placeholder={savedServiceID && execution === 'cloud' ? '使用云端已保存密钥' : 'API Key'} /></Form.Item>
+              <Form.Item name="protocol" label="协议"><Select disabled={Boolean(savedServiceID)} options={[{ value: 'chat_completions', label: 'OpenAI Chat Completions' }, { value: 'responses', label: 'OpenAI Responses' }, { value: 'messages', label: 'Anthropic Messages' }]} /></Form.Item>
               <Form.Item name="model" label="模型 ID" rules={[{ required: true, whitespace: true }]}><Input placeholder="服务实际支持的模型 ID" /></Form.Item>
               <Form.Item name="suite" label="测试集"><Radio.Group optionType="button" buttonStyle="solid" options={[{ value: 'daily', label: '日常测试集 · 6 题' }, { value: 'full', label: '完整测试集 · 89 题' }]} /></Form.Item>
               <Form.Item name="concurrency" label="任务并发数" extra="1–4，默认 1。每题只执行一次，不自动重试。" rules={[{ required: true }]}><InputNumber min={1} max={4} precision={0} /></Form.Item>
@@ -129,6 +143,6 @@ export default function TerminalBenchPage({ token, onExpired }: { token: string;
         </>}
       </Card>
     </Content>
-    <Footer className="app-footer">测试与 Harbor artifacts 保存在服务端 data/terminal-bench。API Key 仅用于本次进程；本服务不上传测试到 Harbor Hub。</Footer>
+    <Footer className="app-footer">{token.mode === 'local' ? '结果保存在浏览器，Harbor 在本机执行，临时文件完成后清理。' : '结果保存在当前云端账号；Harbor 原始产物保存在服务器账号目录。'}</Footer>
   </Layout>
 }

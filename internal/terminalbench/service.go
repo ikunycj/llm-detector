@@ -30,9 +30,14 @@ type Service struct {
 	preparing bool
 	workers   sync.WaitGroup
 	fault     error
+	store     Store
+	cleanup   bool
 }
 
 func NewService(ctx context.Context, root string, runner Runner) (*Service, error) {
+	return NewServiceWithStore(ctx, root, runner, fileStore{root: root}, false)
+}
+func NewServiceWithStore(ctx context.Context, root string, runner Runner, storage Store, cleanup bool) (*Service, error) {
 	catalog, err := LoadCatalog()
 	if err != nil {
 		return nil, err
@@ -44,26 +49,12 @@ func NewService(ctx context.Context, root string, runner Runner) (*Service, erro
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
-	s := &Service{ctx: ctx, root: root, catalog: catalog, runner: runner, jobs: map[string]Job{}}
-	entries, err := os.ReadDir(root)
+	s := &Service{ctx: ctx, root: root, catalog: catalog, runner: runner, jobs: map[string]Job{}, store: storage, cleanup: cleanup}
+	items, err := storage.Load()
 	if err != nil {
 		return nil, err
 	}
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "tb-") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(root, entry.Name(), "job.json"))
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		var job Job
-		if json.Unmarshal(data, &job) != nil || job.ID != entry.Name() {
-			return nil, errors.New("Terminal Bench 历史文件损坏")
-		}
+	for _, job := range items {
 		if job.Status == "running" || job.Status == "cancelling" {
 			job.Status = "interrupted"
 			job.Error = "服务重启中断了运行；不会自动恢复或重复调用模型"
@@ -74,7 +65,7 @@ func NewService(ctx context.Context, root string, runner Runner) (*Service, erro
 					job.Trials[i].Status = "interrupted"
 				}
 			}
-			if err = writeJSONFile(filepath.Join(root, job.ID, "job.json"), job); err != nil {
+			if err = s.store.Save(job); err != nil {
 				return nil, err
 			}
 		}
@@ -152,7 +143,7 @@ func (s *Service) Start(ctx context.Context, input Input) (Job, error) {
 	if err := writeJSONFile(filepath.Join(dir, "input.json"), buildConfig(s.catalog, job, dir)); err != nil {
 		return Job{}, err
 	}
-	if err := writeJSONFile(filepath.Join(dir, "job.json"), job); err != nil {
+	if err := s.store.Save(job); err != nil {
 		return Job{}, err
 	}
 	s.mu.Lock()
@@ -160,9 +151,10 @@ func (s *Service) Start(ctx context.Context, input Input) (Job, error) {
 	s.active = id
 	runCtx, cancel := context.WithTimeout(s.ctx, 24*time.Hour)
 	s.cancel = cancel
+	response := copyJob(job)
 	s.workers.Go(func() { s.run(runCtx, job, input.APIKey) })
 	s.mu.Unlock()
-	return copyJob(job), nil
+	return response, nil
 }
 func (s *Service) Cancel(id string) error {
 	s.mu.Lock()
@@ -175,7 +167,7 @@ func (s *Service) Cancel(id string) error {
 		return nil
 	}
 	job.Status = "cancelling"
-	if err := writeJSONFile(filepath.Join(s.root, id, "job.json"), job); err != nil {
+	if err := s.store.Save(job); err != nil {
 		return err
 	}
 	s.jobs[id] = job
@@ -184,8 +176,25 @@ func (s *Service) Cancel(id string) error {
 }
 func (s *Service) Wait() { s.workers.Wait() }
 
+// Busy reports whether a Harbor job is preparing or running. Local runtime
+// cleanup uses this guard before removing the Python/Harbor cache.
+func (s *Service) Busy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.preparing || s.active != ""
+}
+
 func (s *Service) run(ctx context.Context, job Job, key string) {
 	dir := filepath.Join(s.root, job.ID)
+	if s.cleanup {
+		defer func() {
+			if err := os.RemoveAll(dir); err != nil {
+				s.mu.Lock()
+				s.fault = errors.New("本机临时任务目录清理失败")
+				s.mu.Unlock()
+			}
+		}()
+	}
 	done := make(chan error, 1)
 	go func() { done <- s.runner.Run(ctx, dir, key) }()
 	ticker := time.NewTicker(time.Second)
@@ -244,7 +253,7 @@ wait:
 			}
 		}
 	}
-	if err := writeJSONFile(filepath.Join(dir, "job.json"), job); err != nil {
+	if err := s.store.Save(job); err != nil {
 		s.fault = errors.New("Terminal Bench 结果保存失败，请检查数据目录")
 	}
 	s.jobs[job.ID] = copyJob(job)

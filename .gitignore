@@ -27,3 +27,5 @@ web/.env.local
 # Optional Terminal Bench runtime
 extensions/terminal-bench/.venv/
 **/__pycache__/
+
+/dist/

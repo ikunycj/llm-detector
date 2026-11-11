@@ -81,6 +81,7 @@ export type FingerprintDetails = {
 
 export type Scan = {
   id: string
+  source?: 'local' | 'cloud'
   status: 'pending' | 'running' | 'completed' | 'completed_with_errors' | 'failed'
   vendor: string
   service_name: string

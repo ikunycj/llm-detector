@@ -29,18 +29,27 @@ func NewServer(a *auth.Service, p *providers.Registry, e *evaluators.Registry, s
 	api := &Server{auth: a, providers: p, engines: e, scans: s}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
-	mux.HandleFunc("POST /api/v1/auth/login", api.login)
-	mux.Handle("POST /api/v1/auth/logout", api.protect(func(w http.ResponseWriter, r *http.Request) {
-		a.Logout(r.Header.Get("Authorization"))
-		w.WriteHeader(204)
-	}))
+	if a != nil {
+		mux.HandleFunc("POST /api/v1/auth/login", api.login)
+		mux.Handle("POST /api/v1/auth/logout", api.protect(func(w http.ResponseWriter, r *http.Request) {
+			a.Logout(r.Header.Get("Authorization"))
+			w.WriteHeader(204)
+		}))
+	}
 	mux.Handle("GET /api/v1/providers", api.protect(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"providers": p.List()}) }))
 	mux.Handle("GET /api/v1/evaluators", api.protect(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"evaluators": e.List()})
 	}))
 	mux.Handle("POST /api/v1/models/discover", api.protect(api.discover))
 	mux.Handle("POST /api/v1/scans", api.protect(api.createScan))
-	mux.Handle("GET /api/v1/scans", api.protect(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"scans": s.List()}) }))
+	mux.Handle("GET /api/v1/scans", api.protect(func(w http.ResponseWriter, r *http.Request) {
+		items, err := s.List()
+		if err != nil {
+			writeError(w, 500, "无法读取扫描结果")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"scans": items})
+	}))
 	mux.Handle("GET /api/v1/scans/{id}", api.protect(api.getScan))
 	if jobs != nil {
 		api.inspectionRoutes(mux, jobs)
@@ -62,7 +71,7 @@ func NewServer(a *auth.Service, p *providers.Registry, e *evaluators.Registry, s
 }
 func (s *Server) protect(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.auth.Authenticate(r.Header.Get("Authorization")) {
+		if s.auth != nil && !s.auth.Authenticate(r.Header.Get("Authorization")) {
 			writeError(w, 401, "authentication required")
 			return
 		}

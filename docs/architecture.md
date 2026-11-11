@@ -58,10 +58,10 @@ SDK 专属结果存入 `evaluator.Report.kind/details`，通用 smoke 检查继�
 
 ## 后续替换点
 
-引入持久化时实现 `scan.Store`，同时设计启动任务恢复；仅替换 Store 不能让正在执行的任务自动恢复。当前没有数据库迁移目录，因为还没有数据库 schema。
+引入持久化时实现 `scan.Store`，同时设计启动任务恢复；仅替换 Store 不能让正在执行的任务自动恢复。云端 SQLite 使用 `internal/cloud/schema.sql` 初始化；本地执行器和浏览器数据不使用服务器数据库。旧数据不迁移。
 
 异构 SDK 优先使用独立 module 或独立 worker。worker 通信、凭据传递、取消和错误协议需要在选定第一个 SDK 时设计，当前不提前引入空 RPC 层。
 
 ## 项目批次调度
 
-`pkg/project.Adapter` 是远端项目目录与凭据导入边界。New API 实现在 `internal/projects/newapi`；`internal/inspection` 负责加密文件存储、项目计划、互斥批次与间隔调度。它调用现有 `scan.Service`，每个渠道/引擎项结束后保存不含凭据的 Scan 快照。新库初始化与已有文档校验均在 `OpenStore`，当前文档版本为 1；未引入 SQL 数据库或外部队列。详见 [巡检任务](inspection-tasks.md)。
+`pkg/project.Adapter` 是远端项目目录与凭据导入边界。New API 实现在 `internal/projects/newapi`；云端 `internal/cloud` 负责 SQLite 账号、会话和按用户隔离的业务数据，`internal/inspection` 负责项目计划、互斥批次与间隔调度。本地 Fingerpoint 使用浏览器 vendor 中的官方 shared detector 和 direct transport；本地 Terminal Bench 使用 `cmd/local-runner` 复用 Harbor。状态留在浏览器 IndexedDB，并禁止服务端定时计划。旧加密巡检文件不迁入 SQLite。详见 [巡检任务](inspection-tasks.md)。

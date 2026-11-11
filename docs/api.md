@@ -1,11 +1,11 @@
 # HTTP API v1
 
-前端和 API 使用同源路径。除 `/healthz` 和登录外，所有业务接口都需要 `Authorization: Bearer <session-token>`。错误响应统一为 `{"error":"message"}`，API 响应带 `Cache-Control: no-store`。
+前端和 API 使用同源路径。云端业务接口需要账号会话；公开目录接口无需登录。本地模式的业务请求发送到本机执行器，而不是云端服务。错误响应统一为 `{"error":"message"}`，API 响应带 `Cache-Control: no-store`。
 
 | 方法与路径 | 用途 | 成功状态 |
 | --- | --- | --- |
 | `GET /healthz` | 存活检查 `{"status":"ok"}` | 200 |
-| `POST /api/v1/auth/login` | 部署密钥登录 | 200 |
+| `POST /api/v1/auth/login` | 云端账号密码登录 | 200 |
 | `POST /api/v1/auth/logout` | 撤销当前会话，无响应体 | 204 |
 | `GET /api/v1/providers` | 当前注册的模型协议适配器 | 200 |
 | `GET /api/v1/evaluators` | 当前注册的巡检引擎 | 200 |
@@ -19,7 +19,7 @@
 ## 登录
 
 ```json
-{"key":"your-deployment-login-key"}
+{"username":"admin","password":"your-password"}
 ```
 
 响应示例（时间与 token 为示例）：
@@ -28,7 +28,7 @@
 {"token":"session-token","expires_at":"2026-11-10T12:00:00Z"}
 ```
 
-密钥错误为 401；会话过期、重启或注销后也返回 401。不存在的任务返回 404。登录 token 是唯一需要返回客户端的认证凭据，部署密钥与模型 API Key 不回显。
+账号或密码错误为 401；会话过期、重启或注销后也返回 401。不存在的任务返回 404。登录 token 是唯一需要返回客户端的认证凭据，部署密钥与模型 API Key 不回显。
 
 ## 模型发现
 

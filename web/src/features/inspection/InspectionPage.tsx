@@ -1,23 +1,24 @@
-import { CalendarOutlined, CloudSyncOutlined, EditOutlined, KeyOutlined, LogoutOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
-import { Alert, App as AntApp, Badge, Button, Card, Checkbox, Col, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, Layout, Modal, Popconfirm, Row, Segmented, Select, Space, Switch, Table, Tag, Typography } from 'antd'
+import type { APIClient } from '../../api'
+import { ApiOutlined, CalendarOutlined, CloudSyncOutlined, DeleteOutlined, FileTextOutlined, LinkOutlined, KeyOutlined, LogoutOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
+import { Alert, App as AntApp, Badge, Button, Card, Checkbox, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, Layout, Menu, Modal, Popconfirm, Segmented, Select, Space, Switch, Table, Tag, Typography } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, deleteInspectionProject, getEvaluators, getInspectionProjects, getInspectionRuns, importInspectionKeys, logout, runInspectionBatch, runInspectionProject, saveInspectionChannelProtocol, saveInspectionPlan, saveInspectionProject, syncInspectionProject } from '../../api'
 import type { AppPage, Evaluator } from '../../types'
 import Results from '../scans/Results'
 import type { BatchRun, InspectionPlan, InspectionProject, ProjectChannel, ProjectInput } from './types'
 
-const { Header, Content, Footer } = Layout
+const { Header, Content, Footer, Sider } = Layout
 const { Text, Title, Paragraph } = Typography
 const statusLabels: Record<string, string> = { running: '执行中', pending: '等待执行', completed: '已完成', completed_with_errors: '完成 · 存在错误', failed: '失败', interrupted: '已中断', error: '无法执行' }
 const protocolLabels: Record<string, string> = { chat_completions: 'OpenAI Chat Completions', responses: 'OpenAI Responses', messages: 'Anthropic Messages' }
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN') : '—'
 
 // App provides Ant Design's contextual notifications without introducing global state.
-export default function InspectionPage(props: { token: string; onExpired: () => void; onLogout: () => void; onNavigate: (page: AppPage) => void }) {
+export default function InspectionPage(props: { token: APIClient; onExpired: () => void; onLogout: () => void; onNavigate: (page: AppPage) => void }) {
   return <AntApp><InspectionWorkbench {...props} /></AntApp>
 }
 
-function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token: string; onExpired: () => void; onLogout: () => void; onNavigate: (page: AppPage) => void }) {
+function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token: APIClient; onExpired: () => void; onLogout: () => void; onNavigate: (page: AppPage) => void }) {
   const { message } = AntApp.useApp()
   const [projects, setProjects] = useState<InspectionProject[]>([])
   const [runs, setRuns] = useState<BatchRun[]>([])
@@ -66,6 +67,8 @@ function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token
     const [p, r] = await Promise.all([getInspectionProjects(token, signal), getInspectionRuns(token, signal)])
     if (signal?.aborted) return
     setProjects(p.projects); setRuns(r.runs); setLoaded(true)
+    setChannelID((id) => id && !p.projects.some((project) => project.id === id) ? undefined : id)
+    setSelectedProjects((ids) => ids.filter((id) => p.projects.some((project) => project.id === id)))
   }, [token])
 
   useEffect(() => {
@@ -94,7 +97,7 @@ function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token
     if (!syncID) return
     await action('sync-project', async () => {
       const updated = await syncInspectionProject(token, syncID, { ...values, two_factor_code: values.two_factor_code || '' })
-      syncForm.resetFields(); setSyncID(undefined); setSelectedChannels([]); setChannelGroup(undefined); setChannelPage(1)
+      syncForm.resetFields(); setSyncID(undefined); setSelectedChannels([]); setChannelGroup(undefined); setChannelTag(undefined); setChannelPage(1)
       if (updated.last_error) setError(updated.last_error)
       else void message.success(values.import_keys ? '渠道与可用密钥已同步' : '渠道元数据已同步')
     })
@@ -105,9 +108,10 @@ function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token
     setIdentityMode(project && !project.admin_account ? 'id' : 'account')
     setEditor(project ? { id: project.id } : {})
   }
-  function openChannels(project: InspectionProject) {
-    setChannelID(project.id); setSelectedChannels([])
+  function selectProject(id?: string) {
+    setChannelID(id); setSelectedChannels([])
     setChannelGroup(undefined); setChannelTag(undefined); setChannelPage(1); setChannelError(''); setKeyError('')
+    setKeyDialog(false); keyForm.resetFields()
   }
   function openSettings(project: InspectionProject) {
     setSettingsID(project.id)
@@ -115,9 +119,11 @@ function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token
   }
   async function saveConnection(input: ProjectInput) {
     await action('save-project', async () => {
-      await saveInspectionProject(token, { ...input, admin_account: identityMode === 'account' ? input.admin_account : '', user_id: identityMode === 'id' ? input.user_id : 0, password: identityMode === 'account' ? input.password : '', login_code: identityMode === 'account' ? input.login_code : '', access_token: input.access_token || '' }, editor?.id)
+      const saved = await saveInspectionProject(token, { ...input, admin_account: identityMode === 'account' ? input.admin_account : '', user_id: identityMode === 'id' ? input.user_id : 0, password: identityMode === 'account' ? input.password : '', login_code: identityMode === 'account' ? input.login_code : '', access_token: input.access_token || '' }, editor?.id)
       configForm.resetFields(); setEditor(null)
-      void message.success('连接已保存，可在渠道页同步并导入密钥')
+      setProjects((current) => [...current.filter((project) => project.id !== saved.id), saved])
+      selectProject(saved.id)
+      void message.success('连接已保存，可点击“立即同步”获取渠道并导入密钥')
     })
   }
   async function importKeys(values: { code: string }) {
@@ -191,39 +197,58 @@ function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token
   ]
 
   return <Layout className="app-layout">
-    <Header className="app-header">
-      <Space className="brand" size={12}><span className="brand-mark" aria-hidden="true">L</span><Text strong>LLM Detector</Text><Text type="secondary">/ 巡检任务</Text></Space>
-      <Space><Segmented value="tasks" onChange={(value) => onNavigate(value as AppPage)} options={[{ label: '模型巡检', value: 'scan' }, { label: '巡检任务', value: 'tasks' }, { label: '巡检引擎', value: 'engines' }]} /><Button type="text" icon={<LogoutOutlined />} disabled={Boolean(busy)} onClick={() => void signOut()}>退出登录</Button></Space>
-    </Header>
-    <Content className="app-content inspection-content">
-      <Flex justify="space-between" align="center" wrap gap={16} className="page-heading">
-        <div><Title level={1}>巡检任务</Title><Text type="secondary">从项目同步分组与渠道，由服务端批量检测并按间隔巡检。</Text></div>
-        <Space><Button icon={<ReloadOutlined />} disabled={Boolean(busy)} onClick={() => setRevision((n) => n + 1)}>刷新</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => edit()}>添加项目</Button></Space>
-      </Flex>
-      {error && <Alert type="error" title={error} showIcon closable onClose={() => setError('')} />}
-      <Alert type="info" showIcon title="按分组选择渠道，直接检测上游" description="项目连接与渠道密钥加密保存在本服务。定时批次使用最近同步的渠道快照，与浏览器是否打开无关；本服务需要保持运行。New API 的分组用于筛选渠道，不代表网关分组路由测试。" />
-      <Flex gap={16} align="center" className="inspection-toolbar"><Checkbox checked={projects.length > 0 && selectedProjects.length === projects.length} indeterminate={selectedProjects.length > 0 && selectedProjects.length < projects.length} onChange={(e) => setSelectedProjects(e.target.checked ? projects.map((p) => p.id) : [])}>选择全部项目</Checkbox><Popconfirm title="确认批量立即巡检？" description="将按各项目当前设置发起真实模型请求，可能消耗额度。" onConfirm={() => void batchRun()} okText="确认巡检" cancelText="取消"><Button icon={<PlayCircleOutlined />} disabled={!selectedProjects.length || Boolean(busy)} loading={busy === 'batch-run'}>批量立即巡检（{selectedProjects.length}）</Button></Popconfirm></Flex>
-      {!projects.length ? <Card loading={!loaded}><Empty description="添加 New API 项目后，打开渠道页同步渠道，并在设置中配置巡检计划。" /></Card> : <Row gutter={[20, 20]}>
-        {projects.map((p) => <Col key={p.id} xs={24} xl={12}>
-          <Card className="inspection-project-card" title={<Space><Checkbox checked={selectedProjects.includes(p.id)} onChange={(e) => setSelectedProjects((current) => e.target.checked ? [...current, p.id] : current.filter((id) => id !== p.id))} aria-label={`选择项目 ${p.name}`} /><Text strong>{p.name}</Text><Tag>New API</Tag></Space>} extra={<Badge status={p.busy ? 'processing' : p.plan.enabled ? 'success' : 'default'} text={p.busy ? '执行中' : p.plan.enabled ? '定时已启用' : '手动运行'} />}>
-            <Descriptions size="small" column={1} items={[
-              { key: 'url', label: '项目地址', children: p.base_url },
-              { key: 'channels', label: '已同步', children: `${p.groups.length} 个分组 · ${p.channels.length} 个渠道 · ${p.channels.filter((ch) => ch.has_key).length} 个已导入密钥` },
-              { key: 'synced', label: '同步时间', children: formatTime(p.synced_at) },
-              { key: 'next', label: '下次巡检', children: p.plan.enabled ? `${formatTime(p.next_run_at)}（每 ${p.plan.interval_minutes} 分钟）` : '未启用' },
-            ]} />
-            {p.last_error && <Alert type="error" title={p.last_error} />}
-            <Space wrap className="inspection-actions">
-              <Button icon={<CloudSyncOutlined />} disabled={p.busy || Boolean(busy)} onClick={() => openChannels(p)}>渠道</Button>
-              <Button icon={<SettingOutlined />} disabled={!enginesLoaded || p.busy || Boolean(busy)} onClick={() => openSettings(p)}>设置</Button>
-              <Popconfirm title="确认立即巡检？" description="将按当前设置向已选渠道发起真实模型请求，可能消耗额度。" onConfirm={() => void runProjectNow(p.id)} okText="确认巡检" cancelText="取消"><Button type="primary" icon={<PlayCircleOutlined />} disabled={p.busy || Boolean(busy) || !p.synced_at} loading={busy === `run-${p.id}`}>立即巡检</Button></Popconfirm>
-              <Button type="text" icon={<EditOutlined />} disabled={p.busy || Boolean(busy)} onClick={() => edit(p)}>编辑连接</Button>
-              <Popconfirm title="删除此项目连接、计划与已导入密钥？" description="已完成的批次记录保留。" onConfirm={() => action(`delete-${p.id}`, async () => { await deleteInspectionProject(token, p.id); setSelectedProjects((ids) => ids.filter((id) => id !== p.id)); if (channelID === p.id) setChannelID(undefined); if (settingsID === p.id) setSettingsID(undefined) })} okText="删除" cancelText="取消"><Button type="text" danger disabled={p.busy || Boolean(busy)}>删除</Button></Popconfirm>
-            </Space>
-          </Card>
-        </Col>)}
-      </Row>}
-      <Card className="inspection-run-list" title="巡检批次" extra={<Select allowClear value={runProject} onChange={setRunProject} placeholder="按项目筛选" options={[...new Map(runs.map((run) => [run.project_id, { value: run.project_id, label: run.project_name }])).values()]} style={{ width: 200 }} />}>
+
+    <Layout className="inspection-layout">
+      <Sider width={220} theme="light" className="inspection-sider">
+        <nav aria-label="巡检任务导航" className="inspection-sidebar-nav">
+          <div className="inspection-sidebar-add"><Button type="primary" block icon={<PlusOutlined />} disabled={Boolean(busy)} onClick={() => edit()}>添加项目</Button></div>
+          <Menu aria-label="任务日志导航" mode="inline" selectedKeys={channelID ? [] : ['logs']} disabled={Boolean(busy)} items={[{ key: 'logs', label: '任务日志', icon: <FileTextOutlined /> }]} onClick={() => selectProject()} />
+          <Text type="secondary" className="inspection-sidebar-label">项目 · {projects.length}</Text>
+          <div className="inspection-project-menu">
+            <Menu aria-label="项目列表" mode="inline" selectedKeys={channelID ? [channelID] : []} disabled={Boolean(busy)} items={projects.map((project) => ({ key: project.id, icon: <ApiOutlined />, label: <span title={project.name}>{project.name}</span> }))} onClick={({ key }) => selectProject(key)} />
+            {loaded && !projects.length && <Text type="secondary" className="inspection-sidebar-empty">暂无项目，点击上方添加。</Text>}
+          </div>
+        </nav>
+      </Sider>
+      <Content className="inspection-main">
+        {error && <Alert type="error" title={error} showIcon closable onClose={() => setError('')} />}
+        {channelDetail ? <Card className="inspection-project-panel" title={<Space wrap><Text strong>{channelDetail.name}</Text><Tag>{channelDetail.kind === 'newapi' ? 'New API' : channelDetail.kind}</Tag><Badge status={channelDetail.busy ? 'processing' : channelDetail.plan.enabled ? 'success' : 'default'} text={channelDetail.busy ? '执行中' : channelDetail.plan.enabled ? '定时已启用' : '手动运行'} /></Space>}>
+          <Flex gap={8} wrap align="center" className="inspection-project-actions">
+            <Button icon={<LinkOutlined />} disabled={channelDetail.busy || Boolean(busy)} onClick={() => edit(channelDetail)}>连接</Button>
+            <Button icon={<SettingOutlined />} disabled={!enginesLoaded || channelDetail.busy || Boolean(busy)} onClick={() => openSettings(channelDetail)}>设置</Button>
+            <Button icon={<CloudSyncOutlined />} disabled={channelDetail.busy || Boolean(busy)} loading={busy === 'sync-project'} onClick={() => openSync(channelDetail.id)}>立即同步</Button>
+            <Popconfirm title="删除此项目连接、计划与已导入密钥？" description="已完成的批次记录保留。" onConfirm={() => action(`delete-${channelDetail.id}`, async () => {
+              await deleteInspectionProject(token, channelDetail.id)
+              setSelectedProjects((ids) => ids.filter((id) => id !== channelDetail.id))
+              if (settingsID === channelDetail.id) setSettingsID(undefined)
+              selectProject()
+            })} okText="删除" cancelText="取消"><Button danger icon={<DeleteOutlined />} disabled={channelDetail.busy || Boolean(busy)}>删除</Button></Popconfirm>
+            <Popconfirm title="确认立即巡检？" description="将按当前设置向已选渠道发起真实模型请求，可能消耗额度。" onConfirm={() => void runProjectNow(channelDetail.id)} okText="确认巡检" cancelText="取消"><Button type="primary" icon={<PlayCircleOutlined />} disabled={channelDetail.busy || Boolean(busy) || !channelDetail.synced_at} loading={busy === `run-${channelDetail.id}`}>立即巡检</Button></Popconfirm>
+          </Flex>
+          <Descriptions size="small" column={{ xs: 1, md: 2, xl: 3 }} className="inspection-project-meta" items={[
+            { key: 'url', label: '项目地址', children: channelDetail.base_url },
+            { key: 'synced', label: '同步时间', children: formatTime(channelDetail.synced_at) },
+            { key: 'next', label: '下次巡检', children: channelDetail.plan.enabled ? `${formatTime(channelDetail.next_run_at)}（每 ${channelDetail.plan.interval_minutes} 分钟）` : '未启用' },
+          ]} />
+          {channelDetail.last_error && <Alert type="error" showIcon title={channelDetail.last_error} />}
+          {channelError && <Alert type="error" showIcon title={channelError} />}
+          <Flex justify="space-between" align="center" wrap gap={8} className="inspection-channel-heading"><Title level={4}>渠道</Title><Text type="secondary">{channelDetail.groups.length} 个分组 · {channelDetail.channels.length} 个渠道 · {channelDetail.channels.filter((channel) => channel.has_key).length} 个已导入密钥</Text></Flex>
+        <Flex gap={12} align="center" wrap className="inspection-toolbar">
+          <Select aria-label="按所属分组筛选渠道" allowClear showSearch optionFilterProp="label" placeholder="全部分组" value={channelGroup} style={{ minWidth: 180 }} disabled={channelDetail.busy || Boolean(busy)} onChange={(group) => { setChannelGroup(group); setChannelPage(1); setSelectedChannels([]) }} options={channelDetail.groups.map((group) => ({ value: group, label: group }))} />
+          <Select aria-label="按渠道标签筛选" allowClear showSearch optionFilterProp="label" placeholder="全部标签" value={channelTag} style={{ minWidth: 180 }} disabled={channelDetail.busy || Boolean(busy)} onChange={(tag) => { setChannelTag(tag); setChannelPage(1); setSelectedChannels([]) }} options={[...new Set(channelDetail.channels.map((ch) => ch.tag).filter((tag): tag is string => Boolean(tag)))].sort().map((tag) => ({ value: tag, label: tag }))} />
+          <Button icon={<KeyOutlined />} disabled={channelDetail.busy || Boolean(busy) || !selectedChannels.length} onClick={() => { keyForm.resetFields(); setKeyError(''); setKeyDialog(true) }}>导入选中渠道的密钥（{selectedChannels.length}）</Button>
+        </Flex>
+        <Table<ProjectChannel> rowKey="id" size="small" tableLayout="fixed" dataSource={visibleChannels} columns={channelColumns} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={channelDetail.synced_at ? '没有符合筛选条件的渠道' : '点击上方“立即同步”获取该项目的渠道。'} /> }} rowSelection={{ selectedRowKeys: selectedChannels, onChange: (keys) => setSelectedChannels(keys.map(String)), getCheckboxProps: (ch) => ({ disabled: !ch.enabled || Boolean(ch.issue) || channelDetail.busy || Boolean(busy) }) }} pagination={{ current: channelPage, pageSize: channelPageSize, total: visibleChannels.length, showSizeChanger: true, pageSizeOptions: [10, 20, 50], showTotal: (total) => `共 ${total} 个渠道`, onChange: (page, size) => { setChannelPage(size === channelPageSize ? page : 1); setChannelPageSize(size) } }} scroll={{ x: 1420 }} />
+        </Card> : <>
+          <Flex justify="space-between" align="center" wrap gap={16} className="page-heading">
+            <div><Title level={1}>任务日志</Title><Text type="secondary">查看各项目的巡检批次与执行结果。</Text></div>
+            <Button icon={<ReloadOutlined />} disabled={Boolean(busy)} onClick={() => setRevision((n) => n + 1)}>刷新</Button>
+          </Flex>
+      <Card className="inspection-log-panel" loading={!loaded} title="巡检批次" extra={<Select allowClear value={runProject} onChange={setRunProject} placeholder="按项目筛选" options={[...new Map(runs.map((run) => [run.project_id, { value: run.project_id, label: run.project_name }])).values()]} style={{ width: 200 }} />}>
+        <Flex gap={12} wrap align="center" className="inspection-batch-toolbar">
+          <Select mode="multiple" allowClear aria-label="批量巡检项目" placeholder="选择要批量巡检的项目" className="inspection-batch-select" value={selectedProjects} disabled={!projects.length || Boolean(busy)} maxTagCount="responsive" onChange={setSelectedProjects} options={projects.map((project) => ({ value: project.id, label: project.name, disabled: project.busy }))} />
+          <Popconfirm title="确认批量立即巡检？" description="将按各项目当前设置发起真实模型请求，可能消耗额度。" onConfirm={() => void batchRun()} okText="确认巡检" cancelText="取消"><Button icon={<PlayCircleOutlined />} disabled={!selectedProjects.length || Boolean(busy)} loading={busy === 'batch-run'}>批量立即巡检（{selectedProjects.length}）</Button></Popconfirm>
+        </Flex>
         <Table rowKey="id" size="small" dataSource={runs.filter((run) => !runProject || run.project_id === runProject)} pagination={{ pageSize: 10 }} scroll={{ x: 760 }} columns={[
           { title: '项目 / 批次', key: 'project', render: (_, run) => <Space orientation="vertical" size={0}><Text strong>{run.project_name}</Text><Text type="secondary">{run.id}</Text></Space> },
           { title: '触发', dataIndex: 'trigger', render: (value: string) => value === 'schedule' ? '定时' : '手动' },
@@ -233,7 +258,9 @@ function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token
           { title: '操作', key: 'action', render: (_, run) => <Button type="link" onClick={() => setRunID(run.id)}>查看结果</Button> },
         ]} />
       </Card>
-    </Content>
+        </>}
+      </Content>
+    </Layout>
     <Footer className="app-footer">每个项目最多保留 50 个批次。重启后的定时计划从下一个间隔开始，未完成批次标记为中断。</Footer>
 
     <Modal title="同步渠道" open={Boolean(syncID)} onCancel={() => { setSyncID(undefined); syncForm.resetFields() }} onOk={() => syncForm.submit()} confirmLoading={busy === 'sync-project'} okText="开始同步" cancelText="取消">
@@ -264,19 +291,6 @@ function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token
       </Form>
     </Modal>
 
-    <Drawer title={`${channelDetail?.name || '项目'} · 渠道`} open={Boolean(channelID)} onClose={() => setChannelID(undefined)} width={1000}>
-      {channelDetail && <>
-        {channelError && <Alert type="error" showIcon title={channelError} />}
-        <Flex gap={12} align="center" wrap className="inspection-toolbar">
-          <Select aria-label="按所属分组筛选渠道" allowClear showSearch optionFilterProp="label" placeholder="全部分组" value={channelGroup} style={{ minWidth: 180 }} disabled={channelDetail.busy || Boolean(busy)} onChange={(group) => { setChannelGroup(group); setChannelPage(1); setSelectedChannels([]) }} options={channelDetail.groups.map((group) => ({ value: group, label: group }))} />
-          <Select aria-label="按渠道标签筛选" allowClear showSearch optionFilterProp="label" placeholder="全部标签" value={channelTag} style={{ minWidth: 180 }} disabled={channelDetail.busy || Boolean(busy)} onChange={(tag) => { setChannelTag(tag); setChannelPage(1); setSelectedChannels([]) }} options={[...new Set(channelDetail.channels.map((ch) => ch.tag).filter((tag): tag is string => Boolean(tag)))].sort().map((tag) => ({ value: tag, label: tag }))} />
-          <Button type="primary" icon={<CloudSyncOutlined />} disabled={channelDetail.busy || Boolean(busy)} onClick={() => openSync(channelDetail.id)}>同步渠道</Button>
-          <Button icon={<KeyOutlined />} disabled={channelDetail.busy || Boolean(busy) || !selectedChannels.length} onClick={() => { keyForm.resetFields(); setKeyError(''); setKeyDialog(true) }}>导入选中渠道的密钥（{selectedChannels.length}）</Button>
-        </Flex>
-        <Table<ProjectChannel> rowKey="id" size="small" tableLayout="fixed" dataSource={visibleChannels} columns={channelColumns} rowSelection={{ selectedRowKeys: selectedChannels, onChange: (keys) => setSelectedChannels(keys.map(String)), getCheckboxProps: (ch) => ({ disabled: !ch.enabled || Boolean(ch.issue) || channelDetail.busy || Boolean(busy) }) }} pagination={{ current: channelPage, pageSize: channelPageSize, total: visibleChannels.length, showSizeChanger: true, pageSizeOptions: [10, 20, 50], showTotal: (total) => `共 ${total} 个渠道`, onChange: (page, size) => { setChannelPage(size === channelPageSize ? page : 1); setChannelPageSize(size) } }} scroll={{ x: 1420 }} />
-      </>}
-    </Drawer>
-
     <Drawer title={`${settingsDetail?.name || '项目'} · 设置`} open={Boolean(settingsID)} onClose={() => setSettingsID(undefined)} width={760}>
       {settingsDetail && <Form form={planForm} layout="vertical" disabled={settingsDetail.busy || Boolean(busy)} onFinish={(plan: InspectionPlan) => action('save-plan', async () => { await saveInspectionPlan(token, settingsDetail.id, { ...plan, evaluator_options: Object.fromEntries(Object.entries(plan.evaluator_options || {}).filter(([id]) => plan.evaluators.includes(id))) }); void message.success('设置已保存') })}>
         <Form.Item name="mode" label="巡检范围"><Select options={[{ value: 'all', label: '全部启用渠道' }, { value: 'groups', label: '按分组选择渠道' }, { value: 'channels', label: '指定渠道' }]} /></Form.Item>
@@ -293,8 +307,8 @@ function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token
           </Form.Item>)}
         </Card>)}
         <Form.Item name="interval_minutes" label="执行间隔（分钟）" rules={[{ required: true }]}><InputNumber min={1} max={10080} precision={0} /></Form.Item>
-        <Form.Item name="enabled" label="启用服务端定时巡检" valuePropName="checked"><Switch /></Form.Item>
-        <Alert type="warning" showIcon title="启用后会按计划向上游模型发起真实请求并消耗额度。每个项目内部串行执行，同一项目不重叠运行。" />
+        <Form.Item name="enabled" label="启用服务端定时巡检" valuePropName="checked"><Switch disabled={token.mode === 'local'} /></Form.Item>
+        <Alert type="warning" showIcon title={token.mode === 'local' ? '本地模式仅支持手动触发；配置和批次保存在浏览器，本机执行器负责运行。' : '启用后由云端按计划执行，关闭网页也不影响巡检。'} />
         <Button className="inspection-actions" type="primary" htmlType="submit" icon={<CalendarOutlined />} loading={busy === 'save-plan'} disabled={!engines.length || unavailablePlanEvaluatorIDs.length > 0}>保存设置</Button>
       </Form>}
     </Drawer>

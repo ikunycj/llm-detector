@@ -1,13 +1,7 @@
 .PHONY: backend frontend install init-env test build clean terminal-bench-install
 
 init-env:
-	@if [ ! -f .env ] || grep -q '^APP_LOGIN_KEY=replace-with-a-long-random-key$$' .env; then \
-		key=$$(openssl rand -hex 32) && \
-		sed "s/^APP_LOGIN_KEY=.*/APP_LOGIN_KEY=$$key/" .env.example > .env && \
-		chmod 600 .env && \
-		echo 'Created a private development login key in .env.'; \
-	fi
-	@grep -Eq '^APP_LOGIN_KEY=.+$$' .env || { echo 'APP_LOGIN_KEY is empty in .env.' >&2; exit 1; }
+	python3 scripts/init_env.py
 
 backend: init-env
 	go run ./cmd/server
@@ -32,3 +26,6 @@ clean:
 
 terminal-bench-install:
 	uv sync --project extensions/terminal-bench --locked --python 3.12
+
+local-runner-build:
+	python3 scripts/package_local.py

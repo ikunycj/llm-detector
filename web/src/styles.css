@@ -111,3 +111,57 @@ button, input, select, textarea { font: inherit; }
   .engine-content { padding-inline: 16px; }
   .engine-mobile-switcher { display: flex; flex-direction: column; align-items: flex-start; }
 }
+
+/* Model API management stays above engine selection and results. */
+.scan-content > .ant-alert,
+.model-api-panel,
+.scan-engine-panel { margin-bottom: 24px; }
+.model-api-panel > .ant-card-body > .ant-alert { margin-bottom: 16px; }
+.model-api-url { overflow-wrap: anywhere; }
+.model-api-models { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-api-editor-note { margin-bottom: 20px; }
+.model-api-import-tools { margin-block: 16px; }
+.scan-target-summary { margin-bottom: 20px; }
+.scan-start-action { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 20px; }
+@media (max-width: 600px) {
+  .model-api-panel .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; padding-block: 16px; }
+  .model-api-panel .ant-card-extra { margin-inline-start: 0; }
+  .scan-start-action .ant-btn { width: 100%; }
+}
+
+/* Inspection projects are navigation items; their channel table is the main view. */
+.inspection-layout { width: min(1800px, 100%); min-height: calc(100vh - 136px); margin-inline: auto; background: var(--app-bg); }
+.inspection-sider { position: sticky; top: 0; align-self: flex-start; height: calc(100vh - 64px); border-right: 1px solid var(--app-border); }
+.inspection-sidebar-nav { display: flex; flex-direction: column; height: 100%; }
+.inspection-sidebar-add { padding: 20px 16px 12px; }
+.inspection-sidebar-nav .ant-menu { border-inline-end: 0; }
+.inspection-sidebar-label { padding: 20px 24px 8px; font-size: 12px; }
+.inspection-sidebar-empty { display: block; padding: 8px 24px; }
+.inspection-project-menu { flex: 1; min-height: 0; overflow-y: auto; }
+.inspection-main { min-width: 0; padding: 24px; }
+.inspection-main > .ant-alert,
+.inspection-project-panel > .ant-card-body > .ant-alert { margin-bottom: 16px; }
+.inspection-project-actions { margin-bottom: 20px; }
+.inspection-project-meta { margin-bottom: 20px; }
+.inspection-project-meta .ant-descriptions-item-content { overflow-wrap: anywhere; }
+.inspection-channel-heading h4.ant-typography { margin: 0; }
+.inspection-batch-toolbar { margin-bottom: 20px; }
+.inspection-batch-select { width: 100%; min-width: 220px; max-width: 440px; flex: 1; }
+.inspection-log-panel .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; padding-block: 12px; }
+@media (max-width: 767px) {
+  .inspection-layout { flex-direction: column; }
+  .inspection-sider { position: static; height: auto; width: 100% !important; min-width: 100% !important; max-width: 100% !important; flex: none !important; border-right: 0; border-bottom: 1px solid var(--app-border); }
+  .inspection-sidebar-add { padding: 16px 16px 8px; }
+  .inspection-sidebar-label { padding-top: 12px; }
+  .inspection-project-menu { max-height: 180px; }
+  .inspection-main { padding: 20px 16px; }
+}
+
+.mode-header { display: grid; grid-template-columns: 1fr auto 1fr; gap: 20px; padding-inline: 24px; }
+.mode-navigation { justify-self: end; }
+.runtime-banner { width: min(1160px, calc(100% - 48px)); margin: 20px auto 0; }
+.workspace-surface > .app-layout { min-height: calc(100vh - 64px); }
+@media (max-width: 1100px) {
+  .mode-header { grid-template-columns: 1fr auto; height: auto; padding-block: 12px; }
+  .mode-navigation { grid-column: 1 / -1; justify-self: center; }
+}

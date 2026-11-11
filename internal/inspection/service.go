@@ -34,7 +34,7 @@ type Runner interface {
 type Service struct {
 	mu       sync.Mutex
 	ctx      context.Context
-	store    *FileStore
+	store    Store
 	state    state
 	adapters map[string]project.Adapter
 	scans    Runner
@@ -44,7 +44,7 @@ type Service struct {
 	fault    error
 }
 
-func NewService(ctx context.Context, store *FileStore, data state, scans Runner, engines *evaluators.Registry, adapters ...project.Adapter) (*Service, error) {
+func NewService(ctx context.Context, store Store, data state, scans Runner, engines *evaluators.Registry, adapters ...project.Adapter) (*Service, error) {
 	registry := make(map[string]project.Adapter, len(adapters))
 	for _, adapter := range adapters {
 		if _, ok := registry[adapter.ID()]; ok {

@@ -1,3 +1,4 @@
+import type { APIClient, ExecutionLocation } from '../../api'
 import { CodeOutlined, LogoutOutlined, RadarChartOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Empty, Layout, Menu, Segmented, Skeleton, Space, Typography } from 'antd'
 import { type ReactElement, useEffect, useState } from 'react'
@@ -10,8 +11,10 @@ const { Content, Header, Sider } = Layout
 const { Text } = Typography
 
 type Props = {
-  token: string
-  onExpired: () => void
+  token: APIClient
+  localClient: APIClient
+  cloudClient: APIClient
+  onExpired: (location?: ExecutionLocation) => void
   onLogout: () => void
   onNavigate: (page: AppPage) => void
 }
@@ -19,18 +22,18 @@ type Props = {
 // Only specialized renderers live here; IDs, labels and available engines come from the API.
 const engineViews: Record<string, {
   icon: ReactElement
-  render: (props: Pick<Props, 'token' | 'onExpired'>) => ReactElement
+  render: (props: Pick<Props, 'token' | 'localClient' | 'cloudClient' | 'onExpired'>) => ReactElement
 }> = {
   fingerprint: { icon: <RadarChartOutlined />, render: (props) => <FingerprintPage {...props} /> },
   'terminal-bench': { icon: <CodeOutlined />, render: (props) => <TerminalBenchPage {...props} /> },
 }
 const navigation = [
-  { label: '模型巡检', value: 'scan' },
+  { label: '首页', value: 'scan' },
   { label: '巡检任务', value: 'tasks' },
   { label: '巡检引擎', value: 'engines' },
 ]
 
-export default function EnginesPage({ token, onExpired, onLogout, onNavigate }: Props) {
+export default function EnginesPage({ token, localClient, cloudClient, onExpired, onLogout, onNavigate }: Props) {
   const [engine, setEngine] = useState('')
   const [engines, setEngines] = useState<Evaluator[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -68,17 +71,7 @@ export default function EnginesPage({ token, onExpired, onLogout, onNavigate }: 
   }
 
   return <Layout className="app-layout">
-    <Header className="app-header">
-      <Space className="brand" size={12}>
-        <span className="brand-mark" aria-hidden="true">L</span>
-        <Text strong>LLM Intelligence</Text>
-        <Text type="secondary">/ 巡检引擎</Text>
-      </Space>
-      <Space wrap>
-        <Segmented aria-label="主导航" value="engines" options={navigation} onChange={(value) => onNavigate(value as AppPage)} />
-        <Button type="text" icon={<LogoutOutlined />} loading={signingOut} onClick={() => void signOut()}>退出登录</Button>
-      </Space>
-    </Header>
+
     <Layout className="engine-layout">
       <Sider className="engine-sider" width={220} breakpoint="md" collapsedWidth={0} trigger={null} theme="light">
         <div className="engine-sider-heading">
@@ -97,8 +90,8 @@ export default function EnginesPage({ token, onExpired, onLogout, onNavigate }: 
         {error && <Alert className="engine-shell-error" type="error" title={error} showIcon action={<Button icon={<ReloadOutlined />} onClick={() => setRevision((value) => value + 1)}>重试</Button>} />}
         {!loaded && !error && <Skeleton active />}
         {loaded && !engines.length && <Empty description="当前没有注册巡检引擎" />}
-        {selectedEngine && (engineViews[selectedEngine.id]?.render({ token, onExpired }) || <Card title={selectedEngine.name}>
-          <Space orientation="vertical"><Text>{selectedEngine.description}</Text><Button type="primary" onClick={() => onNavigate('scan')}>前往模型巡检</Button></Space>
+        {selectedEngine && (engineViews[selectedEngine.id]?.render({ token, localClient, cloudClient, onExpired }) || <Card title={selectedEngine.name}>
+          <Space orientation="vertical"><Text>{selectedEngine.description}</Text><Button type="primary" onClick={() => onNavigate('scan')}>前往首页</Button></Space>
         </Card>)}
       </Content>
     </Layout>

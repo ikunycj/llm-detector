@@ -6,6 +6,6 @@ export default defineConfig({
   server: {
     port: 9000,
     strictPort: true,
-    proxy: { '/api': 'http://127.0.0.1:9001', '/healthz': 'http://127.0.0.1:9001' },
+    proxy: { '/api': 'http://127.0.0.1:9001', '/healthz': 'http://127.0.0.1:9001', '/downloads': 'http://127.0.0.1:9001' },
   },
 })

@@ -1,13 +1,16 @@
+import type { APIClient, ExecutionLocation } from '../../api'
 import { RadarChartOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { Alert, Badge, Button, Card, Col, Form, Input, InputNumber, Layout, List, Progress, Row, Select, Space, Switch, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, createScan, getEvaluators, getScan, listScans, type Connection } from '../../api'
+import { detectBrowser } from '../../vendor/fingerpoint/browser'
+import { mergeLocal } from '../../data/local'
 import type { Evaluator, FingerprintDetails, Scan } from '../../types'
 
 const { Content, Footer } = Layout
 const { Text, Title } = Typography
-type FormValues = Connection & { model: string; api: string; count: number; strict: boolean; timeout_seconds: number }
+type FormValues = Connection & { model: string; api: string; count: number; strict: boolean; timeout_seconds: number; execution: ExecutionLocation }
 
 const decisionLabels: Record<string, { label: string; color: string }> = {
   scored: { label: '完整排名', color: 'success' },
@@ -25,9 +28,10 @@ const columns: ColumnsType<CandidateRow> = [
   { title: '参考库概率', dataIndex: 'probability', align: 'right', render: (value: number | null) => value == null ? '不可用' : `${(value * 100).toFixed(1)}%` },
 ]
 
-export default function FingerprintPage({ token, onExpired }: { token: string; onExpired: () => void }) {
+export default function FingerprintPage({ token, localClient, cloudClient, onExpired }: { token: APIClient; localClient: APIClient; cloudClient: APIClient; onExpired: (location?: ExecutionLocation) => void }) {
   const [form] = Form.useForm<FormValues>()
   const [engine, setEngine] = useState<Evaluator | null>(null)
+  const [execution, setExecution] = useState<ExecutionLocation>(token.mode === 'cloud' ? 'cloud' : 'local')
   const [scan, setScan] = useState<Scan | null>(null)
   const [history, setHistory] = useState<Scan[]>([])
   const [busy, setBusy] = useState('')
@@ -37,14 +41,18 @@ export default function FingerprintPage({ token, onExpired }: { token: string; o
   const active = scan?.status === 'pending' || scan?.status === 'running'
   const scanID = scan?.id
 
-  const handleError = useCallback((value: unknown) => {
-    if (value instanceof ApiError && value.status === 401) { onExpired(); return }
+  const handleError = useCallback((value: unknown, location: ExecutionLocation = execution) => {
+    if (value instanceof ApiError && value.status === 401) { onExpired(location); return }
     setError(value instanceof Error ? value.message : '请求失败')
-  }, [onExpired])
+  }, [execution, onExpired])
+
+  useEffect(() => {
+    setExecution(token.mode === 'cloud' ? 'cloud' : 'local')
+  }, [token.mode])
 
   useEffect(() => {
     const controller = new AbortController()
-    Promise.all([getEvaluators(token, controller.signal), listScans(token, controller.signal)]).then(([registry, response]) => {
+    Promise.all([getEvaluators(token, controller.signal), listScans(token, controller.signal, { local: localClient, cloud: cloudClient })]).then(([registry, response]) => {
       if (controller.signal.aborted) return
       const found = registry.evaluators.find((item) => item.id === 'fingerprint') || null
       setEngine(found)
@@ -54,7 +62,7 @@ export default function FingerprintPage({ token, onExpired }: { token: string; o
       if (!found) setError('服务端未注册 Fingerpoint 引擎，请重启后端。')
     }).catch((value: unknown) => { if (!controller.signal.aborted) handleError(value) })
     return () => controller.abort()
-  }, [token, handleError])
+  }, [cloudClient, handleError, localClient, token])
 
   useEffect(() => {
     if (!active || !scanID) return
@@ -63,20 +71,20 @@ export default function FingerprintPage({ token, onExpired }: { token: string; o
     setPollError('')
     async function poll() {
       try {
-        const item = await getScan(token, scanID!, controller.signal)
+        const item = await getScan(scan?.source === 'cloud' ? cloudClient : localClient, scanID!, controller.signal)
         if (controller.signal.aborted) return
         setScan(item)
         setHistory((current) => [item, ...current.filter((previous) => previous.id !== item.id)])
         if (item.status === 'pending' || item.status === 'running') timer = setTimeout(poll, 1200)
       } catch (value) {
         if (controller.signal.aborted) return
-        if (value instanceof ApiError && value.status === 401) onExpired()
+        if (value instanceof ApiError && value.status === 401) onExpired(scan?.source === 'cloud' ? 'cloud' : 'local')
         else setPollError(value instanceof Error ? value.message : '无法读取任务进度')
       }
     }
     void poll()
     return () => { controller.abort(); clearTimeout(timer) }
-  }, [active, scanID, token, onExpired, revision])
+  }, [active, cloudClient, localClient, onExpired, revision, scan?.source, scanID])
 
   async function submit(values: FormValues) {
     if (values.strict && values.count !== 3) {
@@ -84,21 +92,34 @@ export default function FingerprintPage({ token, onExpired }: { token: string; o
       return
     }
     setBusy('start'); setError(''); setPollError('')
+    const connection: Connection = {
+      vendor: '', service_name: values.service_name.trim(), protocol: values.api === 'messages' ? 'messages' : 'chat_completions',
+      base_url: values.base_url, api_key: values.api_key,
+    }
     try {
-      const item = await createScan(token, {
-        vendor: '',
-        service_name: values.service_name.trim(),
-        protocol: values.api === 'messages' ? 'messages' : 'chat_completions',
-        base_url: values.base_url,
-        api_key: values.api_key,
-        scope: 'selected',
-        models: [values.model],
-        evaluator: 'fingerprint',
-        evaluator_options: { api: values.api, count: values.count, strict: values.strict, timeout_seconds: values.timeout_seconds },
-      })
-      setScan(item)
-      setHistory((current) => [item, ...current.filter((previous) => previous.id !== item.id)])
-    } catch (value) { handleError(value) }
+      if (values.execution === 'local') {
+        const result = await detectBrowser({ baseUrl: values.base_url, apiKey: values.api_key, model: values.model, protocol: connection.protocol, count: values.count, strict: values.strict })
+        const analysis = result.analysis
+        const item: Scan = {
+          id: `local-fingerprint-${crypto.randomUUID()}`, source: 'local', status: 'completed', vendor: '', service_name: values.service_name.trim(),
+          evaluator: engine!, scope: 'selected', models: [{ model: { id: values.model, name: values.model }, status: 'completed', report: { checks: [], kind: 'fingerprint', details: {
+            decision: analysis.decision, prediction: analysis.prediction, prediction_name: analysis.prediction_name, family_prediction_name: analysis.family_prediction_name,
+            probability: analysis.probability, probability_scope: null, ranking_score: analysis.ranking_score ?? null,
+            candidates: analysis.results.map((candidate) => ({ model: candidate.model, display_name: candidate.display_name, family: candidate.family, family_name: candidate.family_name, score: candidate.score, probability: candidate.probability })),
+            samples: result.samples, reference_built_at: result.reference_built_at, model_version: result.model_version, evidence: analysis.evidence,
+            disclaimer: '本地浏览器 Fingerpoint 检测；结果仅在参考库内比较，不是身份确认。',
+          } as FingerprintDetails }}], created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
+        }
+        await mergeLocal('scans', [item])
+        setScan(item)
+        setHistory((current) => [item, ...current.filter((previous) => previous.id !== item.id || previous.source !== item.source)])
+      } else {
+        if (!cloudClient.token) throw new Error('云端执行需要先登录云端。')
+        const item = await createScan(cloudClient, { ...connection, scope: 'selected', models: [values.model], evaluator: 'fingerprint', evaluator_options: { api: values.api, count: values.count, strict: values.strict, timeout_seconds: values.timeout_seconds } })
+        setScan(item)
+        setHistory((current) => [item, ...current.filter((previous) => previous.id !== item.id || previous.source !== item.source)])
+      }
+    } catch (value) { handleError(value, values.execution) }
     finally { setBusy('') }
   }
 
@@ -120,7 +141,9 @@ export default function FingerprintPage({ token, onExpired }: { token: string; o
       <Row gutter={[20, 20]} align="stretch" className="workspace-grid">
         <Col xs={24} lg={10}>
           <Card title="检测配置" className="workspace-card">
-            <Form form={form} layout="vertical" requiredMark={false} initialValues={{ service_name: '', api: 'chat_completions', count: 3, strict: true, timeout_seconds: 120 }} onFinish={submit} disabled={Boolean(busy) || Boolean(active)}>
+            <Form form={form} layout="vertical" requiredMark={false} initialValues={{ service_name: '', api: 'chat_completions', count: 3, strict: true, timeout_seconds: 120, execution: token.mode === 'cloud' ? 'cloud' : 'local' }} onFinish={submit} disabled={Boolean(busy) || Boolean(active)}>
+              <Form.Item name="execution" label="执行位置"><Select value={execution} onChange={setExecution} options={[{ value: 'local', label: '本地浏览器', disabled: false }, { value: 'cloud', label: '云端 Go SDK', disabled: !cloudClient.token }]} /></Form.Item>
+              {execution === 'cloud' && <Alert type="info" showIcon title="本次指纹检测将在云端执行" description="模型请求会发送到云端服务；本地执行使用浏览器直接调用模型 API。" />}
               <Form.Item name="service_name" label="服务名称" extra="用于结果列表筛选；可以留空，系统会使用 Base URL。">
                 <Input placeholder="例如：生产网关" />
               </Form.Item>

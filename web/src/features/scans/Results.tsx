@@ -20,15 +20,15 @@ function FingerprintResult({ details }: { details: FingerprintDetails }) {
     </Space>
     {details.error && <Alert type="warning" showIcon message={details.error} />}
     <Collapse items={[
-      { key: 'candidates', label: `候选排名（${details.candidates.length}）`, children: <List size="small" dataSource={details.candidates.slice(0, 10)} renderItem={(candidate, index) => <List.Item><Space><Text type="secondary">{index + 1}.</Text><Text strong>{candidate.display_name || candidate.model}</Text><Text type="secondary">{candidate.family_name || candidate.family}</Text></Space></List.Item>} /> },
-      { key: 'samples', label: `挑战样本（${details.samples.length}）`, children: <List size="small" dataSource={details.samples} renderItem={(sample, index) => <List.Item>样本 {index + 1}：{sample.count}/{sample.expected_count} 个整数，{sample.state}{sample.error ? ` · ${sample.error}` : ''}</List.Item>} /> },
+      { key: 'candidates', label: `候选排名（${(details.candidates || []).length}）`, children: <List size="small" dataSource={(details.candidates || []).slice(0, 10)} renderItem={(candidate, index) => <List.Item><Space><Text type="secondary">{index + 1}.</Text><Text strong>{candidate.display_name || candidate.model}</Text><Text type="secondary">{candidate.family_name || candidate.family}</Text></Space></List.Item>} /> },
+      { key: 'samples', label: `挑战样本（${(details.samples || []).length}）`, children: <List size="small" dataSource={details.samples || []} renderItem={(sample, index) => <List.Item>样本 {index + 1}：{sample.count}/{sample.expected_count} 个整数，{sample.state}{sample.error ? ` · ${sample.error}` : ''}</List.Item>} /> },
     ]} />
     <Text type="secondary">封闭参考库候选排序，不是身份认证或智力评分。概率只在参考库内比较。</Text>
   </Space>
 }
 
 function ChecksResult({ result }: { result: ModelResult }) {
-  const checks = result.report.checks
+  const checks = Array.isArray(result.report?.checks) ? result.report.checks : []
   return <Collapse items={[{ key: result.model.id, label: `${checks.length} 项检查`, children: <Collapse items={checks.map((check) => ({
     key: check.id,
     label: <Flex justify="space-between" gap={12}><span>{check.status === 'passed' ? <CheckCircleOutlined className="status-icon-passed" /> : check.status === 'error' ? <ExclamationCircleOutlined className="status-icon-error" /> : <CloseCircleOutlined className="status-icon-failed" />} {check.name}</span><Space size={4}><Tag color={check.status === 'passed' ? 'success' : check.status === 'error' ? 'error' : 'warning'}>{checkLabel[check.status]}</Tag><Text type="secondary">{check.latency_ms !== undefined && check.status !== 'error' ? `${check.latency_ms} ms` : '—'}</Text></Space></Flex>,
@@ -42,7 +42,7 @@ export default function Results({ scans, engines }: { scans: Scan[]; engines: Ev
   const [engineFilter, setEngineFilter] = useState<string | undefined>()
   const [statusFilter, setStatusFilter] = useState<string | undefined>()
 
-  const rows = useMemo<ResultRow[]>(() => scans.flatMap((scan) => scan.models.map((result) => ({ key: `${scan.id}:${result.model.id}`, scan, result }))), [scans])
+  const rows = useMemo<ResultRow[]>(() => scans.flatMap((scan) => scan.models.map((result) => ({ key: `${scan.source || 'local'}:${scan.id}:${result.model.id}`, scan, result }))), [scans])
   const serviceOptions = useMemo(() => [...new Set(scans.map((scan) => scan.service_name || scan.vendor || '未命名服务'))].sort().map((value) => ({ label: value, value })), [scans])
   const engineOptions = useMemo(() => {
     const known = new Map(engines.map((engine) => [engine.id, engine.name]))
@@ -85,7 +85,7 @@ export default function Results({ scans, engines }: { scans: Scan[]; engines: Ev
       </Flex>
     </Card>
     {!filteredRows.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合筛选条件的结果" /> : <List className="result-list" dataSource={filteredRows} renderItem={({ scan, result }) => {
-      const checks = result.report.checks
+      const checks = Array.isArray(result.report?.checks) ? result.report.checks : []
       const passed = checks.filter((check) => check.status === 'passed').length
       const percent = checks.length ? Math.round((passed / checks.length) * 100) : 0
       const fingerprint = result.report.kind === 'fingerprint' ? result.report.details as FingerprintDetails | undefined : undefined
@@ -94,7 +94,7 @@ export default function Results({ scans, engines }: { scans: Scan[]; engines: Ev
       return <List.Item className="result-list-item">
         <div className="result-row-heading">
           <div className="result-row-title"><Title level={4}>{result.model.name}</Title><Text type="secondary">{result.model.id}</Text></div>
-          <Space wrap><Tag color="blue">{service}</Tag><Tag>{scan.evaluator.name}</Tag><Tag color={scan.status === 'completed' ? 'success' : scan.status === 'completed_with_errors' || scan.status === 'failed' ? 'error' : 'processing'}>{statusLabel(scan.status)}</Tag>{fingerprint ? <Tag color={result.status === 'error' ? 'error' : 'processing'}>{fingerprint.decision || '指纹结果'}</Tag> : <Progress type="circle" size={42} percent={percent} status={result.status === 'error' ? 'exception' : undefined} />}</Space>
+          <Space wrap><Tag color="blue">{service}</Tag><Tag color={scan.source === 'cloud' ? 'blue' : 'default'}>{scan.source === 'cloud' ? '云端结果' : '本地结果'}</Tag><Tag>{scan.evaluator.name}</Tag><Tag color={scan.status === 'completed' ? 'success' : scan.status === 'completed_with_errors' || scan.status === 'failed' ? 'error' : 'processing'}>{statusLabel(scan.status)}</Tag>{fingerprint ? <Tag color={result.status === 'error' ? 'error' : 'processing'}>{fingerprint.decision || '指纹结果'}</Tag> : <Progress type="circle" size={42} percent={percent} status={result.status === 'error' ? 'exception' : undefined} />}</Space>
         </div>
         <Flex wrap gap={12} className="result-row-meta"><Text type="secondary">任务 {scan.id}</Text><Text type="secondary">{new Date(scan.created_at).toLocaleString('zh-CN')}</Text><Text type="secondary">{result.status === 'error' ? '模型结果存在调用错误' : modelLabel[result.status]}</Text></Flex>
         {result.error && <Alert message={result.error} type="error" showIcon />}

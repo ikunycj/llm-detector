@@ -15,10 +15,11 @@ type Memory struct {
 
 func NewMemory() *Memory { return &Memory{scans: make(map[string]scan.Scan)} }
 
-func (s *Memory) Save(item scan.Scan) {
+func (s *Memory) Save(item scan.Scan) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.scans[item.ID] = clone(item)
+	return nil
 }
 func (s *Memory) Get(id string) (scan.Scan, error) {
 	s.mu.RLock()
@@ -29,7 +30,7 @@ func (s *Memory) Get(id string) (scan.Scan, error) {
 	}
 	return clone(item), nil
 }
-func (s *Memory) List() []scan.Scan {
+func (s *Memory) List() ([]scan.Scan, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]scan.Scan, 0, len(s.scans))
@@ -37,7 +38,7 @@ func (s *Memory) List() []scan.Scan {
 		items = append(items, clone(item))
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
-	return items
+	return items, nil
 }
 func clone(item scan.Scan) scan.Scan {
 	item.Models = append([]scan.ModelResult{}, item.Models...)
