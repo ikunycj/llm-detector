@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"strings"
 
-	"llm-intelligence/pkg/evaluator"
+	"llm-detector/pkg/evaluator"
 )
 
 type Engine struct{}
 
 func (Engine) Descriptor() evaluator.Descriptor {
-	return evaluator.Descriptor{ID: "smoke", Name: "基础巡检", Version: "1.0.0", Description: "可用性、精确指令跟随与 JSON 输出；不代表通用智力基准。"}
+	return evaluator.Descriptor{ID: "smoke", Name: "基础巡检", Description: "可用性、精确指令跟随与 JSON 输出；不代表通用智力基准。", Default: true}
 }
 
 func (Engine) Run(ctx context.Context, target evaluator.Target) (evaluator.Report, error) {

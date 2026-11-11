@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,14 +15,15 @@ import (
 	"testing"
 	"time"
 
-	"llm-intelligence/internal/auth"
-	"llm-intelligence/internal/evaluators"
-	"llm-intelligence/internal/evaluators/smoke"
-	"llm-intelligence/internal/httpapi"
-	"llm-intelligence/internal/providers"
-	"llm-intelligence/internal/scan"
-	"llm-intelligence/internal/store"
-	"llm-intelligence/pkg/evaluator"
+	"llm-detector/internal/auth"
+	"llm-detector/internal/evaluators"
+	"llm-detector/internal/evaluators/fingerprint"
+	"llm-detector/internal/evaluators/smoke"
+	"llm-detector/internal/httpapi"
+	"llm-detector/internal/providers"
+	"llm-detector/internal/scan"
+	"llm-detector/internal/store"
+	"llm-detector/pkg/evaluator"
 )
 
 const fixtureAPIKey = "fixture-provider-secret"
@@ -39,7 +41,7 @@ func setup(t *testing.T, engine evaluator.Engine) (http.Handler, *scan.Service) 
 	}
 	s := scan.NewService(ctx, p, e, store.NewMemory())
 	t.Cleanup(func() { cancel(); s.Wait() })
-	return httpapi.NewServer(auth.NewService("fixture-login-key", time.Hour), p, e, s, ""), s
+	return httpapi.NewServer(auth.NewService("fixture-login-key", time.Hour), p, e, s, "", nil, nil), s
 }
 func send(t *testing.T, h http.Handler, method, path, token string, payload any) (int, []byte) {
 	t.Helper()
@@ -264,7 +266,7 @@ func TestRejectInvalidScanRequests(t *testing.T) {
 type optionalEngine struct{}
 
 func (optionalEngine) Descriptor() evaluator.Descriptor {
-	return evaluator.Descriptor{ID: "optional", Name: "Test plugin", Version: "1"}
+	return evaluator.Descriptor{ID: "optional", Name: "Test plugin"}
 }
 func (optionalEngine) Run(context.Context, evaluator.Target) (evaluator.Report, error) {
 	return evaluator.Report{Checks: []evaluator.Check{{ID: "custom", Name: "SDK result", Status: "passed"}}}, nil
@@ -286,17 +288,87 @@ func TestOptionalEvaluatorSelection(t *testing.T) {
 	}
 }
 
+type independentEngine struct{}
+
+func (independentEngine) Descriptor() evaluator.Descriptor {
+	return evaluator.Descriptor{ID: "fingerprint-test", Name: "Fingerprint test"}
+}
+func (independentEngine) ProviderIndependent() bool { return true }
+func (independentEngine) Run(_ context.Context, target evaluator.Target) (evaluator.Report, error) {
+	if target.Provider != nil {
+		return evaluator.Report{}, errors.New("provider should not be required")
+	}
+	if target.Connection.APIKey != fixtureAPIKey {
+		return evaluator.Report{}, errors.New("connection not passed to independent engine")
+	}
+	if !bytes.Contains(target.Options, []byte(`"api":"messages"`)) {
+		return evaluator.Report{}, errors.New("evaluator options not passed")
+	}
+	return evaluator.Report{Kind: "fingerprint", Details: json.RawMessage(`{"decision":"scored","prediction":"model-a"}`)}, nil
+}
+
+func TestProviderIndependentEvaluatorUsesSelectedModelAndOptions(t *testing.T) {
+	h, _ := setup(t, independentEngine{})
+	token := login(t, h)
+	input := map[string]any{
+		"base_url": "https://fingerprint.example/v1", "api_key": fixtureAPIKey,
+		"scope": "selected", "models": []string{"model-a"}, "evaluator": "fingerprint-test",
+		"evaluator_options": map[string]any{"api": "messages", "strict": true},
+	}
+	status, data := send(t, h, "POST", "/api/v1/scans", token, input)
+	if status != 202 {
+		t.Fatalf("start=%d %s", status, data)
+	}
+	var created scan.Scan
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatal(err)
+	}
+	item := waitScan(t, h, token, created.ID)
+	if item.Status != "completed" || item.Vendor != "" || len(item.Models) != 1 || item.Models[0].Report.Kind != "fingerprint" {
+		t.Fatalf("unexpected fingerprint scan: %+v", item)
+	}
+	if !bytes.Contains(item.Models[0].Report.Details, []byte(`"prediction":"model-a"`)) {
+		t.Fatalf("structured result missing: %s", item.Models[0].Report.Details)
+	}
+}
+
+func TestFingerprintRequestRequiresExplicitModelAndValidOptions(t *testing.T) {
+	h, _ := setup(t, fingerprint.New("", "", time.Minute))
+	token := login(t, h)
+	base := map[string]any{
+		"base_url": "https://fingerprint.example/v1", "api_key": fixtureAPIKey,
+		"scope": "selected", "models": []string{"model-a"}, "evaluator": "fingerprint-test",
+	}
+	for _, update := range []map[string]any{
+		{"scope": "all", "models": []string{}},
+		{"evaluator_options": map[string]any{"unexpected": true}},
+		{"evaluator_options": []any{"not-an-object"}},
+	} {
+		input := make(map[string]any, len(base)+len(update))
+		for key, value := range base {
+			input[key] = value
+		}
+		for key, value := range update {
+			input[key] = value
+		}
+		status, _ := send(t, h, "POST", "/api/v1/scans", token, input)
+		if status != 400 {
+			t.Errorf("accepted invalid fingerprint request %v: status %d", update, status)
+		}
+	}
+}
+
 func TestStaticHostingAndAPIRoutes(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>LLM Intelligence</h1>"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>LLM Detector</h1>"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	p := providers.NewRegistry()
 	e := evaluators.NewRegistry()
 	scans := scan.NewService(context.Background(), p, e, store.NewMemory())
-	handler := httpapi.NewServer(auth.NewService("fixture-login-key", time.Hour), p, e, scans, dir)
+	handler := httpapi.NewServer(auth.NewService("fixture-login-key", time.Hour), p, e, scans, dir, nil, nil)
 	status, data := send(t, handler, "GET", "/", "", nil)
-	if status != 200 || !bytes.Contains(data, []byte("LLM Intelligence")) {
+	if status != 200 || !bytes.Contains(data, []byte("LLM Detector")) {
 		t.Fatalf("static page: %d %s", status, data)
 	}
 	status, data = send(t, handler, "GET", "/api/unknown", "", nil)

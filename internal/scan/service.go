@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"llm-intelligence/internal/evaluators"
-	"llm-intelligence/internal/providers"
-	"llm-intelligence/pkg/evaluator"
-	"llm-intelligence/pkg/provider"
+	"llm-detector/internal/evaluators"
+	"llm-detector/internal/providers"
+	"llm-detector/pkg/evaluator"
+	"llm-detector/pkg/provider"
 )
 
 type Service struct {
@@ -29,19 +29,28 @@ func NewService(ctx context.Context, p *providers.Registry, e *evaluators.Regist
 }
 
 func (s *Service) Start(request Request) (Scan, error) {
-	adapter, ok := s.providers.Get(request.Vendor)
-	if !ok {
-		return Scan{}, errors.New("unknown provider")
-	}
 	engine, ok := s.engines.Get(request.Evaluator)
 	if !ok {
 		return Scan{}, errors.New("unknown evaluator")
+	}
+	independent, isIndependent := engine.(evaluator.ProviderIndependent)
+	providerIndependent := isIndependent && independent.ProviderIndependent()
+	adapter, ok := s.providers.Get(request.Vendor)
+	if !ok && !providerIndependent {
+		return Scan{}, errors.New("unknown provider")
+	}
+	if request.Scope == "all" && !ok {
+		return Scan{}, errors.New("selected provider is required to discover all models")
+	}
+	serviceName := strings.TrimSpace(request.ServiceName)
+	if serviceName == "" {
+		serviceName = request.Connection.BaseURL
 	}
 	buffer := make([]byte, 12)
 	if _, err := rand.Read(buffer); err != nil {
 		return Scan{}, fmt.Errorf("create scan ID: %w", err)
 	}
-	item := Scan{ID: "scan-" + hex.EncodeToString(buffer), Status: "pending", Vendor: request.Vendor, Evaluator: engine.Descriptor(), Scope: request.Scope, Models: []ModelResult{}, CreatedAt: time.Now().UTC()}
+	item := Scan{ID: "scan-" + hex.EncodeToString(buffer), Status: "pending", Vendor: request.Vendor, ServiceName: serviceName, Evaluator: engine.Descriptor(), Scope: request.Scope, Models: []ModelResult{}, CreatedAt: time.Now().UTC()}
 	s.store.Save(item)
 	s.workers.Go(func() { s.run(request, item, adapter, engine) })
 	return item, nil
@@ -94,7 +103,7 @@ func (s *Service) run(request Request, item Scan, adapter provider.Provider, eng
 		}
 		item.Models[i].Status = "running"
 		s.store.Save(item)
-		report, err := engine.Run(s.ctx, evaluator.Target{Provider: adapter, Connection: request.Connection, Model: model})
+		report, err := engine.Run(s.ctx, evaluator.Target{Provider: adapter, Connection: request.Connection, Model: model, Options: request.Options})
 		result := &item.Models[i]
 		result.Status = "completed"
 		if err != nil {
@@ -102,7 +111,12 @@ func (s *Service) run(request Request, item Scan, adapter provider.Provider, eng
 			result.Error = redact(err.Error(), request.Connection.APIKey)
 			hasErrors = true
 		}
-		if err == nil && len(report.Checks) == 0 {
+		if err == nil && report.Error != "" {
+			result.Status = "error"
+			result.Error = redact(report.Error, request.Connection.APIKey)
+			hasErrors = true
+		}
+		if err == nil && len(report.Checks) == 0 && report.Kind == "" {
 			result.Status = "error"
 			result.Error = "evaluator returned no checks"
 			hasErrors = true

@@ -2,18 +2,19 @@
 
 ## 当前实现
 
-前端是 React + TypeScript + Vite，后端是 Go 标准库 HTTP 服务。数据库、任务队列和第三方评测运行时不是启动前置条件。
+前端是 React + TypeScript + Vite，后端是 Go HTTP 服务。数据库和任务队列不是启动前置条件。Fingerpoint Go SDK 只在首次指纹任务时加载参考数据。
 
 ```mermaid
 flowchart TD
     UI[React 工作台] --> API[HTTP API / 鉴权 / 输入校验]
     API --> Auth[共享密钥认证 / 内存会话]
     API --> Scan[Scan Service]
-    API --> PR[Provider Registry]
+    API --> PR[Provider Registry（按服务 protocol 选择 Chat Completions、Responses 或 Messages）]
     Scan --> PR
     Scan --> ER[Evaluator Registry]
     PR --> HTTP[OpenAI Compatible]
     ER --> Smoke[Smoke Engine]
+    ER --> Fingerprint[Fingerpoint SDK]
     Smoke --> Contract[provider.Provider 接口]
     Contract --> HTTP
     Scan --> Store[scan.Store 接口]
@@ -27,9 +28,13 @@ flowchart TD
 
 **Provider** 负责模型发现和文本调用，将协议映射为 `provider.Model` / `provider.Completion`。它不知道评测标准。内置适配器有单请求超时、响应大小上限，并禁止跟随重定向，避免凭据被转发。
 
-**Evaluator** 拥有检测方法，可执行一次、多次或多轮模型调用，返回结构化检查证据。版本号随任务快照保存。核心不导入题库 SDK、不做隐式 LLM judge 调用；内置 smoke 引擎用确定性校验完成三项检查。
+**Evaluator** 拥有检测方法，可执行一次、多次或多轮模型调用，返回结构化检查证据。任务快照保存引擎的 ID、名称和说明，不额外保存引擎版本号。核心不导入题库 SDK、不做隐式 LLM judge 调用；内置 smoke 引擎用确定性校验完成三项检查。
+
+Fingerpoint evaluator 实现 `ProviderIndependent`：它使用 SDK 支持的 Responses、Chat Completions 或 Messages 协议直接访问配置的 API，不要求调用 Registry Provider。连接仍经过 HTTP 边界校验并在任务内存中传递。官方参考数据在首次调用时下载并由 SDK 缓存，不阻塞服务启动。
 
 当前没有通用分数可比性假设。页面分别统计 `passed`、`failed`、`error`，不把 HTTP 错误作为智力分数。
+
+SDK 专属结果存入 `evaluator.Report.kind/details`，通用 smoke 检查继续使用 `checks`。指纹结果是参考库内的封闭候选排序，不是身份认证。
 
 ## 任务生命周期
 
@@ -56,3 +61,7 @@ flowchart TD
 引入持久化时实现 `scan.Store`，同时设计启动任务恢复；仅替换 Store 不能让正在执行的任务自动恢复。当前没有数据库迁移目录，因为还没有数据库 schema。
 
 异构 SDK 优先使用独立 module 或独立 worker。worker 通信、凭据传递、取消和错误协议需要在选定第一个 SDK 时设计，当前不提前引入空 RPC 层。
+
+## 项目批次调度
+
+`pkg/project.Adapter` 是远端项目目录与凭据导入边界。New API 实现在 `internal/projects/newapi`；`internal/inspection` 负责加密文件存储、项目计划、互斥批次与间隔调度。它调用现有 `scan.Service`，每个渠道/引擎项结束后保存不含凭据的 Scan 快照。新库初始化与已有文档校验均在 `OpenStore`，当前文档版本为 1；未引入 SQL 数据库或外部队列。详见 [巡检任务](inspection-tasks.md)。

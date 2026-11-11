@@ -1,4 +1,4 @@
-.PHONY: backend frontend install init-env test build clean
+.PHONY: backend frontend install init-env test build clean terminal-bench-install
 
 init-env:
 	@if [ ! -f .env ] || grep -q '^APP_LOGIN_KEY=replace-with-a-long-random-key$$' .env; then \
@@ -29,3 +29,6 @@ build:
 
 clean:
 	rm -rf bin web/dist
+
+terminal-bench-install:
+	uv sync --project extensions/terminal-bench --locked --python 3.12

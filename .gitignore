@@ -20,3 +20,10 @@ web/.env.local
 .idea/
 .vscode/
 *.swp
+
+# Server-side encrypted inspection store and encryption key
+/data/
+
+# Optional Terminal Bench runtime
+extensions/terminal-bench/.venv/
+**/__pycache__/

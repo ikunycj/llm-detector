@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"llm-intelligence/pkg/evaluator"
+	"llm-detector/pkg/evaluator"
 )
 
 // Registry is populated at startup and read only while serving requests.
@@ -33,4 +33,15 @@ func (r *Registry) List() []evaluator.Descriptor {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	return items
+}
+
+// DefaultIDs returns only explicitly declared defaults; never opt users into all engines.
+func (r *Registry) DefaultIDs() []string {
+	ids := []string{}
+	for _, item := range r.List() {
+		if item.Default {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids
 }

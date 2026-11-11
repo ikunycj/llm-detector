@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"llm-intelligence/pkg/provider"
+	"llm-detector/pkg/provider"
 )
 
 type OpenAICompatible struct{ client *http.Client }
@@ -55,23 +55,89 @@ func (p *OpenAICompatible) DiscoverModels(ctx context.Context, conn provider.Con
 }
 
 func (p *OpenAICompatible) Complete(ctx context.Context, conn provider.Connection, modelID, prompt string) (provider.Completion, error) {
-	// Only the common protocol fields are sent. Sampling defaults vary by model.
-	request := map[string]any{"model": modelID, "messages": []map[string]string{{"role": "user", "content": prompt}}}
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content *string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
 	start := time.Now()
-	if err := p.doJSON(ctx, conn, http.MethodPost, "/chat/completions", request, &response); err != nil {
-		return provider.Completion{}, err
+	protocol := conn.Protocol
+	if protocol == "" {
+		protocol = "chat_completions"
 	}
-	if len(response.Choices) == 0 || response.Choices[0].Message.Content == nil {
-		return provider.Completion{}, errors.New("provider returned no text completion")
+	switch protocol {
+	case "chat_completions":
+		request := map[string]any{"model": modelID, "messages": []map[string]string{{"role": "user", "content": prompt}}}
+		var response struct {
+			Choices []struct {
+				Message struct {
+					Content *string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := p.doJSON(ctx, conn, http.MethodPost, "/chat/completions", request, &response); err != nil {
+			return provider.Completion{}, err
+		}
+		if len(response.Choices) == 0 || response.Choices[0].Message.Content == nil {
+			return provider.Completion{}, errors.New("provider returned no text completion")
+		}
+		return provider.Completion{Text: *response.Choices[0].Message.Content, LatencyMS: time.Since(start).Milliseconds()}, nil
+	case "responses":
+		request := map[string]any{"model": modelID, "input": prompt, "store": false}
+		var response struct {
+			Status     string  `json:"status"`
+			OutputText *string `json:"output_text"`
+			Output     []struct {
+				Type    string `json:"type"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"output"`
+		}
+		if err := p.doJSON(ctx, conn, http.MethodPost, "/responses", request, &response); err != nil {
+			return provider.Completion{}, err
+		}
+		if response.Status != "completed" {
+			return provider.Completion{}, errors.New("provider response did not complete")
+		}
+		if response.OutputText != nil && strings.TrimSpace(*response.OutputText) != "" {
+			return provider.Completion{Text: *response.OutputText, LatencyMS: time.Since(start).Milliseconds()}, nil
+		}
+		var content strings.Builder
+		for _, item := range response.Output {
+			if item.Type != "message" {
+				continue
+			}
+			for _, part := range item.Content {
+				if part.Type == "output_text" {
+					content.WriteString(part.Text)
+				}
+			}
+		}
+		if content.Len() == 0 {
+			return provider.Completion{}, errors.New("provider returned no text response")
+		}
+		return provider.Completion{Text: content.String(), LatencyMS: time.Since(start).Milliseconds()}, nil
+	case "messages":
+		request := map[string]any{"model": modelID, "max_tokens": 4096, "messages": []map[string]any{{"role": "user", "content": prompt}}}
+		var response struct {
+			Content []struct {
+				Type string  `json:"type"`
+				Text *string `json:"text"`
+			} `json:"content"`
+		}
+		if err := p.doJSON(ctx, conn, http.MethodPost, "/messages", request, &response); err != nil {
+			return provider.Completion{}, err
+		}
+		var content strings.Builder
+		for _, part := range response.Content {
+			if part.Type == "text" && part.Text != nil {
+				content.WriteString(*part.Text)
+			}
+		}
+		if content.Len() == 0 {
+			return provider.Completion{}, errors.New("provider returned no text message")
+		}
+		return provider.Completion{Text: content.String(), LatencyMS: time.Since(start).Milliseconds()}, nil
+	default:
+		return provider.Completion{}, errors.New("unsupported provider protocol")
 	}
-	return provider.Completion{Text: *response.Choices[0].Message.Content, LatencyMS: time.Since(start).Milliseconds()}, nil
 }
 
 func (p *OpenAICompatible) doJSON(ctx context.Context, conn provider.Connection, method, path string, payload, target any) error {
@@ -87,7 +153,19 @@ func (p *OpenAICompatible) doJSON(ctx context.Context, conn provider.Connection,
 	if err != nil {
 		return errors.New("cannot construct provider request")
 	}
-	request.Header.Set("Authorization", "Bearer "+conn.APIKey)
+	protocol := conn.Protocol
+	if protocol == "" {
+		protocol = "chat_completions"
+	}
+	if protocol == "messages" {
+		request.Header.Set("x-api-key", conn.APIKey)
+		request.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		request.Header.Set("Authorization", "Bearer "+conn.APIKey)
+		if conn.Organization != "" {
+			request.Header.Set("OpenAI-Organization", conn.Organization)
+		}
+	}
 	request.Header.Set("Accept", "application/json")
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")

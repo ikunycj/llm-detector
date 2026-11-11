@@ -11,11 +11,16 @@ import (
 )
 
 type Config struct {
-	Addr           string
-	LoginKey       string
-	SessionTTL     time.Duration
-	RequestTimeout time.Duration
-	WebDist        string
+	DataDir                   string
+	TerminalBenchBinary       string
+	Addr                      string
+	LoginKey                  string
+	SessionTTL                time.Duration
+	RequestTimeout            time.Duration
+	WebDist                   string
+	FingerprintDataSource     string
+	FingerprintCachePath      string
+	FingerprintRequestTimeout time.Duration
 }
 
 func Load() (Config, error) {
@@ -28,9 +33,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("cannot load .env: check its permissions and syntax")
 	}
 	cfg := Config{
-		Addr:     env(values, "HTTP_ADDR", "127.0.0.1:9001"),
-		LoginKey: values["APP_LOGIN_KEY"],
-		WebDist:  env(values, "WEB_DIST_DIR", ""),
+		DataDir:               env(values, "DATA_DIR", "data"),
+		TerminalBenchBinary:   env(values, "TERMINAL_BENCH_BINARY", "extensions/terminal-bench/.venv/bin/harbor"),
+		Addr:                  env(values, "HTTP_ADDR", "127.0.0.1:9001"),
+		LoginKey:              values["APP_LOGIN_KEY"],
+		WebDist:               env(values, "WEB_DIST_DIR", ""),
+		FingerprintDataSource: env(values, "FINGERPRINT_DATA_SOURCE", ""),
+		FingerprintCachePath:  env(values, "FINGERPRINT_CACHE_PATH", ""),
 	}
 	if strings.TrimSpace(cfg.LoginKey) == "" || cfg.LoginKey == "replace-with-a-long-random-key" {
 		return Config{}, fmt.Errorf("set APP_LOGIN_KEY to a private development key in .env")
@@ -40,6 +49,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.RequestTimeout, err = duration(values, "REQUEST_TIMEOUT", "30s")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.FingerprintRequestTimeout, err = duration(values, "FINGERPRINT_REQUEST_TIMEOUT", "120s")
 	if err != nil {
 		return Config{}, err
 	}

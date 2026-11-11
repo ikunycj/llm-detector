@@ -8,11 +8,14 @@ import (
 	"net/url"
 	"strings"
 
-	"llm-intelligence/internal/auth"
-	"llm-intelligence/internal/evaluators"
-	"llm-intelligence/internal/providers"
-	"llm-intelligence/internal/scan"
-	"llm-intelligence/pkg/provider"
+	"llm-detector/internal/auth"
+	"llm-detector/internal/evaluators"
+	"llm-detector/internal/inspection"
+	"llm-detector/internal/providers"
+	"llm-detector/internal/scan"
+	"llm-detector/internal/terminalbench"
+	"llm-detector/pkg/evaluator"
+	"llm-detector/pkg/provider"
 )
 
 type Server struct {
@@ -22,7 +25,7 @@ type Server struct {
 	scans     *scan.Service
 }
 
-func NewServer(a *auth.Service, p *providers.Registry, e *evaluators.Registry, s *scan.Service, webDist string) http.Handler {
+func NewServer(a *auth.Service, p *providers.Registry, e *evaluators.Registry, s *scan.Service, webDist string, jobs *inspection.Service, bench *terminalbench.Service) http.Handler {
 	api := &Server{auth: a, providers: p, engines: e, scans: s}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
@@ -39,6 +42,12 @@ func NewServer(a *auth.Service, p *providers.Registry, e *evaluators.Registry, s
 	mux.Handle("POST /api/v1/scans", api.protect(api.createScan))
 	mux.Handle("GET /api/v1/scans", api.protect(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"scans": s.List()}) }))
 	mux.Handle("GET /api/v1/scans/{id}", api.protect(api.getScan))
+	if jobs != nil {
+		api.inspectionRoutes(mux, jobs)
+	}
+	if bench != nil {
+		api.terminalBenchRoutes(mux, bench)
+	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, 404, "endpoint not found") })
 	if webDist != "" {
 		mux.Handle("/", http.FileServer(http.Dir(webDist)))
@@ -80,23 +89,35 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 type connectionInput struct {
-	Vendor  string `json:"vendor"`
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
+	Vendor      string `json:"vendor"`
+	ServiceName string `json:"service_name"`
+	Protocol    string `json:"protocol"`
+	BaseURL     string `json:"base_url"`
+	APIKey      string `json:"api_key"`
 }
 
 func (s *Server) connection(input connectionInput) (provider.Connection, error) {
 	if _, ok := s.providers.Get(input.Vendor); !ok {
 		return provider.Connection{}, errors.New("unknown provider")
 	}
-	base, err := url.Parse(strings.TrimSpace(input.BaseURL))
+	return parseConnection(input.BaseURL, input.APIKey, input.Protocol)
+}
+
+func parseConnection(baseURL, apiKey, protocol string) (provider.Connection, error) {
+	if protocol == "" {
+		protocol = "chat_completions"
+	}
+	if protocol != "chat_completions" && protocol != "responses" && protocol != "messages" {
+		return provider.Connection{}, errors.New("protocol must be chat_completions, responses or messages")
+	}
+	base, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || base.Hostname() == "" || (base.Scheme != "http" && base.Scheme != "https") || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
 		return provider.Connection{}, errors.New("base_url must be an HTTP(S) API root without credentials, query or fragment")
 	}
-	if strings.TrimSpace(input.APIKey) == "" || strings.ContainsAny(input.APIKey, "\r\n") {
+	if strings.TrimSpace(apiKey) == "" || strings.ContainsAny(apiKey, "\r\n") {
 		return provider.Connection{}, errors.New("api_key is required and must not contain line breaks")
 	}
-	return provider.Connection{BaseURL: strings.TrimRight(base.String(), "/"), APIKey: input.APIKey}, nil
+	return provider.Connection{BaseURL: strings.TrimRight(base.String(), "/"), APIKey: apiKey, Protocol: protocol}, nil
 }
 func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 	var input connectionInput
@@ -119,20 +140,59 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		connectionInput
-		Scope     string   `json:"scope"`
-		Models    []string `json:"models"`
-		Evaluator string   `json:"evaluator"`
+		Scope            string          `json:"scope"`
+		Models           []string        `json:"models"`
+		Evaluator        string          `json:"evaluator"`
+		EvaluatorOptions json.RawMessage `json:"evaluator_options"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
-	conn, err := s.connection(input.connectionInput)
+	engine, ok := s.engines.Get(input.Evaluator)
+	if !ok {
+		writeError(w, 400, "unknown evaluator")
+		return
+	}
+	independent, isIndependent := engine.(evaluator.ProviderIndependent)
+	isProviderIndependent := isIndependent && independent.ProviderIndependent()
+	var conn provider.Connection
+	var err error
+	if isProviderIndependent {
+		if input.Vendor != "" {
+			if _, ok := s.providers.Get(input.Vendor); !ok {
+				writeError(w, 400, "unknown provider")
+				return
+			}
+		}
+		conn, err = parseConnection(input.BaseURL, input.APIKey, input.Protocol)
+	} else {
+		conn, err = s.connection(input.connectionInput)
+	}
 	if err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
+	options := input.EvaluatorOptions
+	if len(options) == 0 {
+		options = json.RawMessage(`{}`)
+	}
+	var optionObject map[string]json.RawMessage
+	if err := json.Unmarshal(options, &optionObject); err != nil || optionObject == nil {
+		writeError(w, 400, "evaluator_options must be a JSON object")
+		return
+	}
+	if validator, ok := engine.(evaluator.OptionsValidator); ok {
+		if err := validator.ValidateOptions(options); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+	}
 	if input.Scope != "all" && input.Scope != "selected" {
 		writeError(w, 400, "scope must be all or selected")
+		return
+	}
+	if engine.Descriptor().RequiresExplicitModels && input.Scope == "all" {
+		writeError(w, 400, "this evaluator requires one or more explicitly selected model IDs")
 		return
 	}
 	if input.Scope == "all" && len(input.Models) > 0 {
@@ -156,11 +216,11 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "select at least one model")
 		return
 	}
-	if _, ok := s.engines.Get(input.Evaluator); !ok {
-		writeError(w, 400, "unknown evaluator")
+	if !isProviderIndependent && input.Vendor == "" {
+		writeError(w, 400, "vendor is required")
 		return
 	}
-	item, err := s.scans.Start(scan.Request{Vendor: input.Vendor, Connection: conn, Scope: input.Scope, Models: models, Evaluator: input.Evaluator})
+	item, err := s.scans.Start(scan.Request{Vendor: input.Vendor, ServiceName: input.ServiceName, Connection: conn, Scope: input.Scope, Models: models, Evaluator: input.Evaluator, Options: options})
 	if err != nil {
 		writeError(w, 500, "could not create scan")
 		return

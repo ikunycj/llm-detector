@@ -1,6 +1,6 @@
 # 可选扩展目录
 
-此目录目前只有规划，没有安装第三方评测 SDK。内置 smoke 实现在 `internal/evaluators/smoke`。
+此目录用于隔离重量级或跨语言 SDK。Fingerpoint Go SDK 是当前已集成的评测依赖，适配实现在 `internal/evaluators/fingerprint`；内置 smoke 实现在 `internal/evaluators/smoke`。
 
 当实际接入工具时，按以下职责组织，不提前创建空实现：
 
@@ -16,6 +16,6 @@ extensions/
     └── <vendor>/              # 原生厂商协议 / SDK 适配器
 ```
 
-每个扩展只使用所需的一种依赖清单。核心通过 `pkg/provider` / `pkg/evaluator` 接口调用，默认根模块不依赖此目录下的外部运行时。
+每个扩展只使用所需的一种依赖清单。核心通过 `pkg/provider` / `pkg/evaluator` 接口调用；未选型的其他 SDK 不加入根模块。
 
 当前注册方式是编译时显式装配。跨语言 worker 与通信协议在首次实际接入时设计，尚未实现。详见 [插件指南](../docs/plugin-sdk.md)。

@@ -25,7 +25,7 @@ export default function Login({ onLogin, notice }: { onLogin: (token: string) =>
         <Space orientation="vertical" size={24} style={{ width: '100%' }}>
           <Space size={12} className="brand">
             <span className="brand-mark" aria-hidden="true">L</span>
-            <Typography.Text strong>LLM Intelligence</Typography.Text>
+            <Typography.Text strong>LLM Detector</Typography.Text>
           </Space>
           <div>
             <Typography.Title level={1}>模型智力巡检</Typography.Title>

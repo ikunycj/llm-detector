@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"llm-intelligence/pkg/provider"
+	"llm-detector/pkg/provider"
 )
 
 type Descriptor struct {

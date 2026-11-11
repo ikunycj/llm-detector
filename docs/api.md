@@ -8,11 +8,13 @@
 | `POST /api/v1/auth/login` | 部署密钥登录 | 200 |
 | `POST /api/v1/auth/logout` | 撤销当前会话，无响应体 | 204 |
 | `GET /api/v1/providers` | 当前注册的模型协议适配器 | 200 |
-| `GET /api/v1/evaluators` | 当前注册的检测引擎和版本 | 200 |
+| `GET /api/v1/evaluators` | 当前注册的巡检引擎 | 200 |
 | `POST /api/v1/models/discover` | 模型发现 | 200 |
 | `POST /api/v1/scans` | 创建异步巡检 | 202 |
 | `GET /api/v1/scans` | 内存任务完整快照，按创建时间倒序 | 200 |
 | `GET /api/v1/scans/{id}` | 单任务快照 | 200 |
+
+`GET /api/v1/evaluators` 返回统一的巡检引擎目录，当前生产注册为 `fingerprint` 和 `terminal-bench`。每项包含 `id`、`name`、`description`；可选的 `default` 表示新配置默认选中，`requires_explicit_models` 表示需明确模型 ID。`options` 数组提供参数控件的 `key`、`label`、`kind`、`default` 与 `choices` 或 `min/max`。顶部引擎菜单与项目设置均读取这份目录。
 
 ## 登录
 
@@ -57,24 +59,27 @@ URL 必须是完整 HTTP(S) API 根地址，不能有用户名/密码、查询�
   "api_key":"provider-api-key",
   "scope":"selected",
   "models":["model-a","model-b"],
-  "evaluator":"smoke"
+  "evaluator":"fingerprint"
 }
 ```
 
-扫描全部模型：
+扫描全部模型时先调用 `/models/discover`，再将返回的 ID 列表作为 `scope=selected` 的 `models`，分别提交所选引擎。当前注册的两个引擎都要求明确模型 ID。
+
+Terminal Bench 示例：
 
 ```json
 {
-  "vendor":"openai-compatible",
   "base_url":"https://api.example.com/v1",
   "api_key":"provider-api-key",
-  "scope":"all",
-  "models":[],
-  "evaluator":"smoke"
+  "protocol":"chat_completions",
+  "scope":"selected",
+  "models":["model-a"],
+  "evaluator":"terminal-bench",
+  "evaluator_options":{"suite":"daily","concurrency":1}
 }
 ```
 
-`scope` 与 `evaluator` 必填。`selected` 至少一个非空 ID；`all` 不允许非空模型列表。重复模型 ID 去重。未知 provider/evaluator、无效输入或多个 JSON 值返回 400；没有“选中为空自动变成全部”的隐式行为。请求体上限 1 MiB，未知 JSON 字段拒绝。
+`scope`、`evaluator`、`base_url` 和 `api_key` 必填，`service_name`、`protocol` 可选（`protocol` 默认为 `chat_completions`，也可设为 `responses` 或 `messages`），用于结果列表筛选；为空时后端使用 Base URL。普通 evaluator 还要求已注册 `vendor`；`fingerprint` 是 provider-independent evaluator，可以省略 `vendor`，但必须选中一个模型，不能使用 `scope=all`。`selected` 至少一个非空 ID；`all` 不允许非空模型列表。重复模型 ID 去重。`evaluator_options` 是可选 JSON 对象，Fingerpoint 支持 `api`、`count`、`strict`、`timeout_seconds`。未知 provider/evaluator、无效输入或多个 JSON 值返回 400；没有“选中为空自动变成全部”的隐式行为。请求体上限 1 MiB，未知 JSON 字段拒绝。
 
 创建后立即返回任务（`models` 初始为空）：
 
@@ -83,7 +88,7 @@ URL 必须是完整 HTTP(S) API 根地址，不能有用户名/密码、查询�
   "id":"scan-example",
   "status":"pending",
   "vendor":"openai-compatible",
-  "evaluator":{"id":"smoke","name":"基础巡检","version":"1.0.0","description":"可用性、精确指令跟随与 JSON 输出；不代表通用智力基准。"},
+  "evaluator":{"id":"fingerprint","name":"Fingerpoint 指纹检测","description":"模型指纹候选识别。","requires_explicit_models":true},
   "scope":"selected",
   "models":[],
   "created_at":"2026-11-10T04:00:00Z"
@@ -121,3 +126,11 @@ URL 必须是完整 HTTP(S) API 根地址，不能有用户名/密码、查询�
 模型状态：`pending`、`running`、`completed`、`error`。检查状态：`passed`（判定通过）、`failed`（返回内容未通过）、`error`（接口/执行错误）。调用错误示例：`{"id":"availability","name":"可用性","status":"error","latency_ms":0,"error":"provider returned HTTP 429"}`。检查结果在每个模型完成时一起更新；未提供逐 token 进度。
 
 当前没有总智力分数、成本统计、取消或重试 API。界面按检查状态分别计数。
+
+## 项目连接、批次与定时计划
+
+独立的 `/api/v1/inspection/*` 接口见 [巡检任务](inspection-tasks.md)。这些接口复用登录鉴权，连接/密钥保存在服务器加密文件中；普通 `/scans` 接口继续保持原有语义。
+
+## Terminal Bench
+
+`terminal-bench` evaluator 将 `/scans` 和项目巡检任务接到同一个 Harbor Service；也保留 `/api/v1/terminal-bench/*` 接口用于独立页面的进度、取消和历史查看。运行说明见 [Terminal Bench](terminal-bench.md)。

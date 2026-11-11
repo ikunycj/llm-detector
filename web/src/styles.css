@@ -38,6 +38,12 @@ button, input, select, textarea { font: inherit; }
 .model-picker .ant-list { max-height: 220px; overflow: auto; }
 .model-picker .ant-list-item { padding-block: 8px; }
 .history-card { margin-bottom: 20px; }
+.fingerprint-content > .ant-alert { margin-bottom: 18px; }
+.fingerprint-disclaimer { margin-bottom: 22px; }
+.fingerprint-results { display: flex; width: 100%; }
+.fingerprint-summary { margin-block: 14px; }
+.fingerprint-evidence { margin: 12px 0; }
+.sample-row { width: 100%; }
 .results-card { margin-top: 4px; }
 .results-card > .ant-card-body > .ant-alert { margin-bottom: 16px; }
 .result-meta { margin-bottom: 16px; }
@@ -69,4 +75,39 @@ button, input, select, textarea { font: inherit; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+.inspection-content > .ant-alert { margin-bottom: 18px; }
+.inspection-toolbar { margin-block: 18px; }
+.inspection-actions { margin-top: 20px; }
+.inspection-engine-options { margin-bottom: 16px; }
+.inspection-project-card { height: 100%; }
+.inspection-project-card .ant-descriptions-item-content { overflow-wrap: anywhere; }
+.inspection-run-list { margin-top: 28px; }
+@media (max-width: 760px) {
+  .app-header { height: auto; min-height: 58px; flex-wrap: wrap; gap: 8px; padding-block: 12px; }
+}
+
+.terminal-bench-content > .ant-alert { margin-bottom: 20px; }
+.terminal-bench-grid { margin-top: 20px; }
+.terminal-bench-start { margin-top: 20px; }
+.terminal-bench-task-catalog { max-height: 620px; overflow: auto; }
+.terminal-bench-source { margin-top: 20px; overflow-wrap: anywhere; }
+.terminal-bench-results { margin-top: 24px; }
+.terminal-bench-job-select { width: 100%; margin-bottom: 20px; }
+.terminal-bench-summary { margin-block: 12px 20px; }
+
+.engine-layout { width: min(1480px, 100%); margin-inline: auto; background: var(--app-bg); }
+.engine-sider { border-right: 1px solid var(--app-border); }
+.engine-sider-heading { display: flex; flex-direction: column; gap: 4px; padding: 24px 20px 16px; }
+.engine-sider .ant-menu { border-inline-end: 0; }
+.engine-content { min-width: 0; padding-inline: 24px; }
+.engine-embedded-layout { min-height: 0; background: transparent; }
+.engine-embedded-layout > .app-content { width: 100%; margin: 0; padding: 28px 0 20px; }
+.engine-mobile-switcher { display: none; gap: 12px; padding-top: 24px; }
+.engine-shell-error { margin-top: 24px; }
+@media (max-width: 767px) {
+  .engine-sider { display: none; }
+  .engine-content { padding-inline: 16px; }
+  .engine-mobile-switcher { display: flex; flex-direction: column; align-items: flex-start; }
 }

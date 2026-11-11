@@ -14,7 +14,7 @@ func TestConfiguration(t *testing.T) {
 	}
 	// Inherited command-line keys must not replace the key selected in .env.
 	t.Setenv("APP_LOGIN_KEY", "fixture-process-key")
-	for _, key := range []string{"HTTP_ADDR", "SESSION_TTL", "REQUEST_TIMEOUT", "WEB_DIST_DIR"} {
+	for _, key := range []string{"HTTP_ADDR", "SESSION_TTL", "REQUEST_TIMEOUT", "FINGERPRINT_REQUEST_TIMEOUT", "WEB_DIST_DIR"} {
 		t.Setenv(key, "")
 	}
 	cfg, err := Load()
@@ -26,6 +26,9 @@ func TestConfiguration(t *testing.T) {
 	}
 	if cfg.Addr != "127.0.0.1:9001" || cfg.SessionTTL != 2*time.Hour || cfg.RequestTimeout != 15*time.Second {
 		t.Fatal("file values or defaults were not applied")
+	}
+	if cfg.FingerprintRequestTimeout != 120*time.Second {
+		t.Fatalf("fingerprint request timeout default = %s", cfg.FingerprintRequestTimeout)
 	}
 	t.Setenv("HTTP_ADDR", "127.0.0.1:19001")
 	t.Setenv("WEB_DIST_DIR", "web/dist")

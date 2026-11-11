@@ -4,8 +4,8 @@ import (
 	"sort"
 	"sync"
 
-	"llm-intelligence/internal/scan"
-	"llm-intelligence/pkg/evaluator"
+	"llm-detector/internal/scan"
+	"llm-detector/pkg/evaluator"
 )
 
 type Memory struct {
@@ -43,6 +43,7 @@ func clone(item scan.Scan) scan.Scan {
 	item.Models = append([]scan.ModelResult{}, item.Models...)
 	for i := range item.Models {
 		item.Models[i].Report.Checks = append([]evaluator.Check{}, item.Models[i].Report.Checks...)
+		item.Models[i].Report.Details = append([]byte(nil), item.Models[i].Report.Details...)
 	}
 	if item.StartedAt != nil {
 		value := *item.StartedAt

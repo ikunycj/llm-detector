@@ -4,8 +4,10 @@ package provider
 import "context"
 
 type Connection struct {
-	BaseURL string `json:"-"`
-	APIKey  string `json:"-"`
+	BaseURL      string `json:"-"`
+	APIKey       string `json:"-"`
+	Protocol     string `json:"-"`
+	Organization string `json:"-"`
 }
 
 type Model struct {
