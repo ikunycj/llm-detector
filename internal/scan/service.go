@@ -167,6 +167,9 @@ func (s *Service) run(request Request, item Scan, adapter provider.Provider, eng
 				result.Status = "error"
 			}
 		}
+		if report.Checks == nil {
+			report.Checks = []evaluator.Check{}
+		}
 		result.Report = report
 		if !s.persist(item) {
 			return

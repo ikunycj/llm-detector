@@ -3,6 +3,8 @@ package cloud
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -94,14 +96,13 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 }
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Key string `json:"key"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
-	if len(input.Username) > 128 || len(input.Password) > 256 {
-		failure(w, 400, "账号或密码格式无效")
+	if len(input.Key) > 256 {
+		failure(w, 400, "访问密钥过长")
 		return
 	}
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
@@ -120,11 +121,13 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.attempts[host] = append(attempts, now)
 	s.mu.Unlock()
-	user, token, expiry, err := s.db.Login(input.Username, input.Password, s.cfg.SessionTTL)
-	if errors.Is(err, ErrCredentials) {
-		failure(w, 401, ErrCredentials.Error())
+	expected := sha256.Sum256([]byte(s.cfg.CloudLoginKey))
+	supplied := sha256.Sum256([]byte(input.Key))
+	if s.cfg.CloudLoginKey == "" || input.Key == "" || subtle.ConstantTimeCompare(expected[:], supplied[:]) != 1 {
+		failure(w, 401, "云端访问密钥不正确")
 		return
 	}
+	user, token, expiry, err := s.db.SessionForAccount(s.cfg.CloudAdminUsername, s.cfg.SessionTTL)
 	if err != nil {
 		failure(w, 500, "登录服务不可用")
 		return
@@ -141,6 +144,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	s.ServeUser(w, r, user)
+}
+
+// ServeUser serves an already authenticated account. Only trusted authentication adapters call it.
+func (s *Server) ServeUser(w http.ResponseWriter, r *http.Request, user User) {
 	switch r.URL.Path {
 	case "/api/v1/auth/me":
 		if r.Method != "GET" {
@@ -159,6 +167,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(204)
+		return
+	case "/api/v1/model-services/transfer":
+		s.transferService(w, r, user.ID)
 		return
 	case "/api/v1/model-services":
 		s.modelServices(w, r, user.ID)

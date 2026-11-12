@@ -112,21 +112,24 @@ button, input, select, textarea { font: inherit; }
   .engine-mobile-switcher { display: flex; flex-direction: column; align-items: flex-start; }
 }
 
-/* Model API management stays above engine selection and results. */
+/* Model API filters and row actions stay above inspection results. */
 .scan-content > .ant-alert,
-.model-api-panel,
-.scan-engine-panel { margin-bottom: 24px; }
+.model-api-panel { margin-bottom: 24px; }
 .model-api-panel > .ant-card-body > .ant-alert { margin-bottom: 16px; }
 .model-api-url { overflow-wrap: anywhere; }
 .model-api-models { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-api-editor-note { margin-bottom: 20px; }
 .model-api-import-tools { margin-block: 16px; }
-.scan-target-summary { margin-bottom: 20px; }
-.scan-start-action { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 20px; }
+.model-api-filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-block: 20px; }
+.model-api-filters .ant-form-item { flex: 1 1 180px; min-width: 0; margin-bottom: 0; }
+.model-api-filters > .ant-btn { flex-shrink: 0; }
+.scan-dialog-target { margin-block: 20px; }
+.scan-dialog-target .ant-typography { margin-bottom: 8px; }
+.scan-dialog-error { margin-bottom: 16px; }
 @media (max-width: 600px) {
   .model-api-panel .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; padding-block: 16px; }
   .model-api-panel .ant-card-extra { margin-inline-start: 0; }
-  .scan-start-action .ant-btn { width: 100%; }
+  .model-api-filters .ant-form-item { flex-basis: 100%; }
 }
 
 /* Inspection projects are navigation items; their channel table is the main view. */
@@ -164,4 +167,79 @@ button, input, select, textarea { font: inherit; }
 @media (max-width: 1100px) {
   .mode-header { grid-template-columns: 1fr auto; height: auto; padding-block: 12px; }
   .mode-navigation { grid-column: 1 / -1; justify-self: center; }
+}
+
+.unified-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; height: auto; min-height: 72px; padding: 12px 24px; flex-wrap: wrap; }
+.destination-options { display: flex; flex-direction: column; gap: 18px; width: 100%; margin: 12px 0 24px; }
+.destination-options .ant-radio-wrapper { align-items: flex-start; }
+.destination-note { margin-top: 16px; }
+.worker-install-links { margin: 16px 0; }
+.source-load-errors { margin-bottom: 16px; }
+@media (max-width: 760px) { .unified-header { padding: 12px; } .unified-header > .ant-segmented { order: 3; width: 100%; } }
+
+/* Fingerprint workspace: one API strip, followed by three equal sample panels. */
+.fingerprint-workbench { --fp-line: oklch(0.88 0.008 270); }
+.fingerprint-page-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 16px; margin-bottom: 22px; }
+.fingerprint-page-heading h2.ant-typography { margin: 0; font-size: 25px; }
+.fingerprint-api-strip.ant-collapse { border-color: var(--fp-line); border-radius: 12px; background: white; margin-bottom: 24px; }
+.fingerprint-api-strip > .ant-collapse-item > .ant-collapse-header { align-items: center; padding: 14px 20px; }
+.fingerprint-api-summary { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.fingerprint-config-icon { display: inline-grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; border: 1px solid var(--fp-line); border-radius: 8px; background: oklch(0.98 0.003 270); font-size: 18px; }
+.fingerprint-endpoint, .fingerprint-model { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fingerprint-endpoint { flex: 1; }
+.fingerprint-model { flex: 0.8; }
+.fingerprint-api-strip .ant-form { margin-top: 20px; }
+.fingerprint-api-strip .ant-form-item:last-child { margin-bottom: 0; }
+.fingerprint-api-strip .ant-input-number { width: 100%; }
+.fingerprint-samples-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-bottom: 24px; }
+.fingerprint-sample-card.ant-card { display: flex; flex-direction: column; min-width: 0; border-radius: 12px; border-color: var(--fp-line); }
+.fingerprint-sample-card .ant-card-head { min-height: 68px; padding-inline: 20px; }
+.fingerprint-sample-card .ant-card-body { display: flex; flex-direction: column; flex: 1; padding: 0 20px 18px; }
+.fingerprint-sample-card .ant-tag { margin-inline-end: 0; }
+.fingerprint-sample-section { padding-top: 18px; }
+.fingerprint-section-label { display: flex; align-items: center; justify-content: space-between; min-height: 26px; margin-bottom: 10px; }
+.fingerprint-prompt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; min-height: 6.4em; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.fingerprint-prompt.is-expanded { display: block; }
+.fingerprint-expand.ant-btn { padding-inline: 0; }
+.fingerprint-prompt-note { display: block; margin-top: 6px; font-size: 12px; line-height: 1.6; }
+.fingerprint-reply-section { display: flex; flex-direction: column; flex: 1; margin-top: 18px; border-top: 1px solid var(--fp-line); }
+.fingerprint-reply { flex: 1; min-height: 220px; max-height: 320px; overflow: auto; margin: 0; padding: 14px; border: 1px dashed var(--fp-line); border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fingerprint-reply-empty { display: grid; place-items: center; background: radial-gradient(circle, oklch(0.9 0.003 270) 1px, transparent 1px) 0 0 / 10px 10px; color: var(--app-muted); }
+.fingerprint-reply-empty span { padding: 5px 12px; background: oklch(1 0 0 / 0.9); font-family: inherit; }
+.fingerprint-sample-message { min-height: 34px; padding-top: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.fingerprint-sample-metrics { margin-top: 8px; font-size: 12px; }
+.fingerprint-round-actions { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: center; margin-bottom: 24px; }
+.fingerprint-ranking { margin-bottom: 20px; }
+.fingerprint-ranking .ant-alert { margin-bottom: 12px; }
+.fingerprint-history-caption { padding-top: 12px; }
+.fingerprint-history .ant-alert { margin-top: 12px; }
+@media (max-width: 1050px) {
+  .fingerprint-samples-grid { grid-template-columns: 1fr; }
+  .fingerprint-prompt { min-height: 0; }
+  .fingerprint-reply { min-height: 180px; }
+}
+@media (max-width: 600px) {
+  .fingerprint-api-summary { gap: 8px; flex-wrap: wrap; }
+  .fingerprint-config-icon { width: 30px; height: 30px; }
+  .fingerprint-round-actions > .ant-space { width: 100%; justify-content: flex-end; }
+  .fingerprint-page-heading { gap: 4px; }
+}
+
+/* Unified inspection log: one table, progressive detail, shared source identity. */
+.inspection-logs-content { width: min(1480px, calc(100% - 48px)); }
+.inspection-logs-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.inspection-logs-content > .ant-alert { margin-bottom: 16px; }
+.inspection-log-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.inspection-log-filters > .ant-input-search { flex: 1 1 280px; min-width: 240px; }
+.inspection-log-filters > .ant-select { flex: 1 1 150px; min-width: 140px; }
+.inspection-log-count { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.inspection-log-detail { display: flex; flex-direction: column; gap: 16px; }
+.inspection-log-detail-toolbar { margin-bottom: 12px; }
+.inspection-log-detail .result-list-item { display: block; }
+.inspection-log-detail .result-list-item > .ant-alert { margin-bottom: 12px; }
+.inspection-log-detail .fingerprint-samples-grid { margin-bottom: 0; }
+@media (max-width: 760px) {
+  .inspection-logs-content { width: calc(100% - 32px); }
+  .inspection-log-filters > .ant-select { flex-basis: calc(50% - 12px); }
+  .inspection-log-filters > .ant-input-search { min-width: 0; flex-basis: 100%; }
 }

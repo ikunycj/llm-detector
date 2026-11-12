@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +26,10 @@ func run() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+	cfg.CloudAdminUsername = strings.ToLower(strings.TrimSpace(cfg.CloudAdminUsername))
+	if cfg.CloudLoginKey == "" {
+		return errors.New("请在 .env 配置 APP_LOGIN_KEY，或运行 make init-env")
 	}
 	if cfg.WebDist != "" {
 		if _, err := os.Stat(filepath.Join(cfg.WebDist, "index.html")); err != nil {
@@ -46,6 +51,22 @@ func run() error {
 		if _, err = db.CreateUser(cfg.CloudAdminUsername, cfg.CloudAdminPassword); err != nil {
 			return errors.New("请在 .env 配置 CLOUD_ADMIN_USERNAME 和 CLOUD_ADMIN_PASSWORD，或运行 make init-env")
 		}
+	}
+	// Existing deployments keep their account IDs and data. Reject a mistyped owner
+	// instead of authenticating a key into a different or empty workspace.
+	users, err = db.Users()
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, user := range users {
+		if user.Username == cfg.CloudAdminUsername {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.New("CLOUD_ADMIN_USERNAME 必须指向已有的云端数据账号")
 	}
 	backend, err := cloud.NewServer(ctx, cfg, db)
 	if err != nil {

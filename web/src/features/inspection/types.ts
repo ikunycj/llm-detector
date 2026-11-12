@@ -27,6 +27,7 @@ export type InspectionPlan = {
   interval_minutes: number
 }
 export type InspectionProject = {
+  source?: import('../../data/sources').SourceID
   admin_account?: string
   id: string
   name: string
@@ -44,6 +45,7 @@ export type InspectionProject = {
 }
 export type ProjectInput = { admin_account?: string; password?: string; login_code?: string; name: string; kind: string; base_url: string; user_id: number; access_token: string }
 export type BatchRun = {
+  source?: import('../../data/sources').SourceID
   id: string
   project_id: string
   project_name: string

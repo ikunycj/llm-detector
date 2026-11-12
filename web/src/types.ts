@@ -65,6 +65,10 @@ export type FingerprintDetails = {
   }>
   samples: Array<{
     challenge_id: string
+    prompt?: string
+    output?: string
+    output_truncated?: boolean
+    elapsed_ms?: number
     expected_count: number
     state: string
     count: number
@@ -81,7 +85,7 @@ export type FingerprintDetails = {
 
 export type Scan = {
   id: string
-  source?: 'local' | 'cloud'
+  source?: import('./data/sources').SourceID
   status: 'pending' | 'running' | 'completed' | 'completed_with_errors' | 'failed'
   vendor: string
   service_name: string
@@ -94,4 +98,4 @@ export type Scan = {
   completed_at?: string
 }
 
-export type AppPage = 'scan' | 'tasks' | 'engines'
+export type AppPage = 'scan' | 'tasks' | 'engines' | 'logs'

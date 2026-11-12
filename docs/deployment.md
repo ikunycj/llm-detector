@@ -35,14 +35,15 @@ make init-env
 `make init-env` 会生成根目录 `.env`。首次部署至少需要设置云端初始账号：
 
 ```dotenv
+APP_LOGIN_KEY=替换为随机访问密钥
 CLOUD_ADMIN_USERNAME=admin
-CLOUD_ADMIN_PASSWORD=替换为长度至少 12 位的密码
+CLOUD_ADMIN_PASSWORD=仅用于新数据库初始化的内部密码
 HTTP_ADDR=127.0.0.1:9001
 WEB_DIST_DIR=web/dist
 DATA_DIR=data
 ```
 
-不要把 `.env` 放到静态文件目录，不要把 `CLOUD_ADMIN_PASSWORD` 写入 Git 或启动命令行。
+不要把 `.env` 放到静态文件目录，不要把 `APP_LOGIN_KEY` 或 `CLOUD_ADMIN_PASSWORD` 写入 Git 或启动命令行。
 
 构建后端、前端和本机执行器压缩包：
 
@@ -162,7 +163,7 @@ sudo journalctl -u llm-detector -f
 - `WorkingDirectory` 是项目根目录
 - 根目录 `.env` 存在且可被服务用户读取
 - `WEB_DIST_DIR=web/dist`
-- `CLOUD_ADMIN_USERNAME` 和 `CLOUD_ADMIN_PASSWORD` 已设置
+- `APP_LOGIN_KEY` 已设置，`CLOUD_ADMIN_USERNAME` 指向目标数据账号（新库初始化还需 `CLOUD_ADMIN_PASSWORD`）
 - `data/` 对服务用户可写
 - 9001 没有被其他进程占用
 
@@ -369,3 +370,5 @@ sudo systemctl restart llm-detector
 5. 在网页点击「连接本机执行器」。
 
 不要在运行中的执行器目录直接覆盖二进制；先停止旧进程，再替换文件。
+
+网页登录只需要 `APP_LOGIN_KEY`。用户名与初始化密码不显示在网页登录表单中。

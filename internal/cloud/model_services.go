@@ -108,3 +108,29 @@ func (s *Server) modelServices(w http.ResponseWriter, r *http.Request, userID in
 	}
 	respond(w, 200, map[string]any{"services": items})
 }
+
+// Explicit transfer only: list responses continue to redact credentials.
+func (s *Server) transferService(w http.ResponseWriter, r *http.Request, userID int64) {
+	if r.Method != http.MethodPost {
+		failure(w, 405, "method not allowed")
+		return
+	}
+	var input struct {
+		ID string `json:"id"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	services, err := s.loadServices(userID)
+	if err != nil {
+		failure(w, 500, "无法读取模型配置")
+		return
+	}
+	for _, service := range services {
+		if service.ID == input.ID {
+			respond(w, 200, service)
+			return
+		}
+	}
+	failure(w, 404, "模型 API 配置不存在")
+}

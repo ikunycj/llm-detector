@@ -1,335 +1,711 @@
-import type { APIClient } from '../../api'
-import { ApiOutlined, CalendarOutlined, CloudSyncOutlined, DeleteOutlined, FileTextOutlined, LinkOutlined, KeyOutlined, LogoutOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
-import { Alert, App as AntApp, Badge, Button, Card, Checkbox, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, Layout, Menu, Modal, Popconfirm, Segmented, Select, Space, Switch, Table, Tag, Typography } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
-import { ApiError, deleteInspectionProject, getEvaluators, getInspectionProjects, getInspectionRuns, importInspectionKeys, logout, runInspectionBatch, runInspectionProject, saveInspectionChannelProtocol, saveInspectionPlan, saveInspectionProject, syncInspectionProject } from '../../api'
-import type { AppPage, Evaluator } from '../../types'
-import Results from '../scans/Results'
+import {
+  ApiOutlined,
+  CalendarOutlined,
+  CloudSyncOutlined,
+  DeleteOutlined,
+  KeyOutlined,
+  LinkOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  SettingOutlined,
+} from '@ant-design/icons'
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Descriptions,
+  Drawer,
+  Empty,
+  Flex,
+  Form,
+  Input,
+  InputNumber,
+  Layout,
+  Menu,
+  Modal,
+  Popconfirm,
+  Radio,
+  Select,
+  Space,
+  Switch,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
+import { useMemo, useState, useEffect } from 'react'
+import {
+  copyProject,
+  deleteInspectionProject,
+  getCatalog,
+  getInspectionProjects,
+  getInspectionRuns,
+  importInspectionKeys,
+  runInspectionProject,
+  saveInspectionChannelProtocol,
+  saveInspectionPlan,
+  saveInspectionProject,
+  syncInspectionProject,
+  exportProject,
+  type APIClient,
+} from '../../api'
+import { SourceTag, useLocations, useSourceData } from '../../app/Locations'
+import { recordKey, sourceID } from '../../data/sources'
+import type { Evaluator } from '../../types'
+import type { LogNavigation } from '../logs/records'
 import type { BatchRun, InspectionPlan, InspectionProject, ProjectChannel, ProjectInput } from './types'
-
-const { Header, Content, Footer, Sider } = Layout
-const { Text, Title, Paragraph } = Typography
-const statusLabels: Record<string, string> = { running: '执行中', pending: '等待执行', completed: '已完成', completed_with_errors: '完成 · 存在错误', failed: '失败', interrupted: '已中断', error: '无法执行' }
-const protocolLabels: Record<string, string> = { chat_completions: 'OpenAI Chat Completions', responses: 'OpenAI Responses', messages: 'Anthropic Messages' }
-const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN') : '—'
-
-// App provides Ant Design's contextual notifications without introducing global state.
-export default function InspectionPage(props: { token: APIClient; onExpired: () => void; onLogout: () => void; onNavigate: (page: AppPage) => void }) {
-  return <AntApp><InspectionWorkbench {...props} /></AntApp>
+const { Text, Title } = Typography
+const statuses: Record<string, string> = {
+  pending: '等待执行',
+  running: '执行中',
+  completed: '已完成',
+  completed_with_errors: '完成 · 存在错误',
+  failed: '失败',
+  interrupted: '已中断',
+  error: '无法执行',
 }
-
-function InspectionWorkbench({ token, onExpired, onLogout, onNavigate }: { token: APIClient; onExpired: () => void; onLogout: () => void; onNavigate: (page: AppPage) => void }) {
-  const { message } = AntApp.useApp()
-  const [projects, setProjects] = useState<InspectionProject[]>([])
-  const [runs, setRuns] = useState<BatchRun[]>([])
+const protocols: Record<string, string> = {
+  chat_completions: 'Chat Completions',
+  responses: 'Responses',
+  messages: 'Messages',
+}
+const date = (value?: string) => (value ? new Date(value).toLocaleString('zh-CN') : '—')
+const load = async (client: APIClient, signal: AbortSignal) => {
+  const [p, r] = await Promise.all([getInspectionProjects(client, signal), getInspectionRuns(client, signal)])
+  return [{ projects: p.projects, runs: r.runs }]
+}
+export default function InspectionPage({ onOpenLogs }: LogNavigation) {
+  const { owner, choose, ensure, changed, label } = useLocations()
+  const { items, errors, loading, refresh } = useSourceData(load, 5000)
+  const projects = items.flatMap((item) => item.projects),
+    runs = items.flatMap((item) => item.runs).sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const [selected, setSelected] = useState<string>()
+  const project = projects.find((item) => recordKey(item) === selected) || projects[0]
   const [engines, setEngines] = useState<Evaluator[]>([])
-  const [enginesLoaded, setEnginesLoaded] = useState(false)
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState('')
-  const [loaded, setLoaded] = useState(false)
-  const [revision, setRevision] = useState(0)
-  const [selectedProjects, setSelectedProjects] = useState<string[]>([])
-  const [editor, setEditor] = useState<{ id?: string } | null>(null)
-  const [identityMode, setIdentityMode] = useState<'account' | 'id'>('account')
-  const [syncID, setSyncID] = useState<string>()
-  const [syncForm] = Form.useForm<{ import_keys: boolean; two_factor_code: string }>()
-  const [configForm] = Form.useForm<ProjectInput>()
-  const [planForm] = Form.useForm<InspectionPlan>()
-  const [keyForm] = Form.useForm<{ code: string }>()
-  const [channelID, setChannelID] = useState<string>()
-  const [settingsID, setSettingsID] = useState<string>()
-  const [channelGroup, setChannelGroup] = useState<string>()
-  const [channelTag, setChannelTag] = useState<string>()
-  const [channelPage, setChannelPage] = useState(1)
-  const [channelPageSize, setChannelPageSize] = useState(10)
-  const [channelError, setChannelError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [editor, setEditor] = useState<{ project?: InspectionProject }>()
+  const [settings, setSettings] = useState<InspectionProject>()
+  const [syncProject, setSyncProject] = useState<InspectionProject>()
+  const [keyProject, setKeyProject] = useState<InspectionProject>()
   const [selectedChannels, setSelectedChannels] = useState<string[]>([])
-  const [keyDialog, setKeyDialog] = useState(false)
-  const [keyError, setKeyError] = useState('')
-  const [runID, setRunID] = useState<string>()
-  const [runProject, setRunProject] = useState<string>()
+  const [group, setGroup] = useState<string>()
+  const [tag, setTag] = useState<string>()
+  const [batchProjects, setBatchProjects] = useState<string[]>([])
+  const [report, setReport] = useState<{ project: InspectionProject; channel: ProjectChannel }>()
+  const [connectionForm] = Form.useForm<ProjectInput>()
+  const [planForm] = Form.useForm<InspectionPlan>()
+  const [syncForm] = Form.useForm<{ import_keys: boolean; two_factor_code: string }>()
+  const [keyForm] = Form.useForm<{ code: string }>()
+  const [identity, setIdentity] = useState<'account' | 'id'>('account')
   const planMode = Form.useWatch('mode', planForm)
-  const planEvaluatorIDs = Form.useWatch<InspectionPlan['evaluators']>('evaluators', planForm) || []
-  const channelDetail = projects.find((p) => p.id === channelID)
-  const settingsDetail = projects.find((p) => p.id === settingsID)
-  const currentRun = runs.find((r) => r.id === runID)
-  const visibleChannels = channelDetail?.channels.filter((ch) => (!channelGroup || ch.groups.includes(channelGroup)) && (!channelTag || ch.tag === channelTag)) || []
-  const availableEvaluatorIDs = new Set(engines.map((engine) => engine.id))
-  const unavailablePlanEvaluatorIDs = enginesLoaded ? planEvaluatorIDs.filter((id) => !availableEvaluatorIDs.has(id)) : []
-
-
-  const reportError = useCallback((err: unknown) => {
-    if (err instanceof ApiError && err.status === 401) { onExpired(); return }
-    setError(err instanceof Error ? err.message : '操作失败')
-  }, [onExpired])
-
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    const [p, r] = await Promise.all([getInspectionProjects(token, signal), getInspectionRuns(token, signal)])
-    if (signal?.aborted) return
-    setProjects(p.projects); setRuns(r.runs); setLoaded(true)
-    setChannelID((id) => id && !p.projects.some((project) => project.id === id) ? undefined : id)
-    setSelectedProjects((ids) => ids.filter((id) => p.projects.some((project) => project.id === id)))
-  }, [token])
-
+  const planEngines = Form.useWatch('evaluators', planForm) || []
   useEffect(() => {
     const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout>
-    async function update() {
-      try { await refresh(controller.signal) }
-      catch (err) { if (!controller.signal.aborted) reportError(err) }
-      if (!controller.signal.aborted) timer = setTimeout(update, 5000)
+    getCatalog(controller.signal)
+      .then((data) => setEngines(data.evaluators))
+      .catch((err) => {
+        if (!controller.signal.aborted) setError(err.message)
+      })
+    return () => controller.abort()
+  }, [])
+  const histories = useMemo(() => {
+    const map = new Map<string, Array<{ run: BatchRun; item: BatchRun['items'][number] }>>()
+    for (const run of runs)
+      for (const item of run.items) {
+        const key = `${run.source}:${run.project_id}:${item.channel_id}`
+        const list = map.get(key) || []
+        list.push({ run, item })
+        map.set(key, list)
+      }
+    return map
+  }, [items])
+  const history = report
+    ? histories.get(`${report.project.source}:${report.project.id}:${report.channel.id}`) || []
+    : []
+  async function work(action: () => Promise<void>) {
+    setBusy(true)
+    setError('')
+    try {
+      await action()
+      changed()
+      refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败')
+    } finally {
+      setBusy(false)
     }
-    void update()
-    getEvaluators(token, controller.signal).then((r) => { if (!controller.signal.aborted) { setEngines(r.evaluators); setEnginesLoaded(true) } }).catch((err: unknown) => { if (!controller.signal.aborted) reportError(err) })
-    return () => { controller.abort(); clearTimeout(timer) }
-  }, [refresh, token, reportError, revision])
-
-  async function action(name: string, work: () => Promise<void>) {
-    setBusy(name); setError('')
-    try { await work(); await refresh() } catch (err) { reportError(err) } finally { setBusy('') }
   }
-  async function signOut() {
-    setBusy('logout'); setError('')
-    try { await logout(token); onLogout() } catch (err) { reportError(err) } finally { setBusy('') }
+  async function destination(p: InspectionProject, action: 'save' | 'execute', title: string, runner = false) {
+    const client = await choose({ action, title, from: p.source, requireRunner: runner })
+    if (!client) return null
+    const copied = await copyProject(owner(p.source), p, client)
+    setSelected(recordKey({ ...copied, source: sourceID(client) }))
+    return { client, project: copied }
   }
-  function openSync(id: string) { syncForm.resetFields(); syncForm.setFieldsValue({ import_keys: true, two_factor_code: '' }); setSyncID(id) }
-  async function sync(values: { import_keys: boolean; two_factor_code: string }) {
-    if (!syncID) return
-    await action('sync-project', async () => {
-      const updated = await syncInspectionProject(token, syncID, { ...values, two_factor_code: values.two_factor_code || '' })
-      syncForm.resetFields(); setSyncID(undefined); setSelectedChannels([]); setChannelGroup(undefined); setChannelTag(undefined); setChannelPage(1)
-      if (updated.last_error) setError(updated.last_error)
-      else void message.success(values.import_keys ? '渠道与可用密钥已同步' : '渠道元数据已同步')
+  function openConnection(p?: InspectionProject) {
+    connectionForm.resetFields()
+    connectionForm.setFieldsValue({
+      name: p?.name || '',
+      kind: 'newapi',
+      base_url: p?.base_url || '',
+      admin_account: p?.admin_account || '',
+      user_id: p?.user_id || 1,
+      access_token: '',
+      password: '',
+      login_code: '',
+    })
+    setIdentity(p && !p.admin_account ? 'id' : 'account')
+    setEditor({ project: p })
+  }
+  async function saveConnection(values: ProjectInput) {
+    await work(async () => {
+      const target = await choose({ action: 'save', title: '项目连接保存到哪里？', from: editor?.project?.source })
+      if (!target) return
+      const previous = editor?.project
+      const same = previous && previous.source === sourceID(target)
+      let input = {
+        ...values,
+        user_id: identity === 'id' ? values.user_id : previous?.user_id || 0,
+        admin_account: identity === 'account' ? values.admin_account : '',
+        password: identity === 'account' ? values.password : '',
+        login_code: identity === 'account' ? values.login_code : '',
+      }
+      if (previous && !same && !input.access_token) {
+        const data = await exportProject(owner(previous.source), previous)
+        input = { ...input, access_token: data.access_token }
+      }
+      const needRunner = target.mode === 'local' && identity === 'account' && (!previous || Boolean(input.password) || input.admin_account !== previous.admin_account)
+      const client = await ensure(target, needRunner)
+      if (!client) return
+      const copied = previous && !same ? await copyProject(owner(previous.source), previous, client) : previous
+      const saved = await saveInspectionProject(client, input, copied?.id)
+      setSelected(recordKey({ ...saved, source: sourceID(client) }))
+      setEditor(undefined)
     })
   }
-  function edit(project?: InspectionProject) {
-    configForm.resetFields()
-    configForm.setFieldsValue({ name: project?.name || '', kind: project?.kind || 'newapi', base_url: project?.base_url || '', user_id: project?.user_id || 1, admin_account: project?.admin_account || '', password: '', login_code: '', access_token: '' })
-    setIdentityMode(project && !project.admin_account ? 'id' : 'account')
-    setEditor(project ? { id: project.id } : {})
+  async function run(p: InspectionProject) {
+    await work(async () => {
+      const dest = await destination(p, 'execute', '项目巡检在哪里执行？', true)
+      if (!dest) return
+      const result = await runInspectionProject(dest.client, dest.project.id)
+      onOpenLogs({ kind: 'batch', id: result.id, source: sourceID(dest.client) })
+    })
   }
-  function selectProject(id?: string) {
-    setChannelID(id); setSelectedChannels([])
-    setChannelGroup(undefined); setChannelTag(undefined); setChannelPage(1); setChannelError(''); setKeyError('')
-    setKeyDialog(false); keyForm.resetFields()
+  async function batchRun() {
+    await work(async () => {
+      const client = await choose({ action: 'execute', title: '批量项目巡检在哪里执行？', requireRunner: true })
+      if (!client) return
+      const failures: string[] = []
+      for (const key of batchProjects) {
+        const p = projects.find((item) => recordKey(item) === key)
+        if (!p) continue
+        try {
+          const copy = await copyProject(owner(p.source), p, client)
+          await runInspectionProject(client, copy.id)
+        } catch (err) {
+          failures.push(`${p.name}：${err instanceof Error ? err.message : '启动失败'}`)
+        }
+      }
+      if (failures.length) setError(failures.join('；'))
+    })
   }
-  function openSettings(project: InspectionProject) {
-    setSettingsID(project.id)
-    planForm.resetFields(); planForm.setFieldsValue(project.plan)
+  function openSettings(p: InspectionProject) {
+    planForm.resetFields()
+    planForm.setFieldsValue(p.plan)
+    setSettings(p)
   }
-  async function saveConnection(input: ProjectInput) {
-    await action('save-project', async () => {
-      const saved = await saveInspectionProject(token, { ...input, admin_account: identityMode === 'account' ? input.admin_account : '', user_id: identityMode === 'id' ? input.user_id : 0, password: identityMode === 'account' ? input.password : '', login_code: identityMode === 'account' ? input.login_code : '', access_token: input.access_token || '' }, editor?.id)
-      configForm.resetFields(); setEditor(null)
-      setProjects((current) => [...current.filter((project) => project.id !== saved.id), saved])
-      selectProject(saved.id)
-      void message.success('连接已保存，可点击“立即同步”获取渠道并导入密钥')
+  async function savePlan(values: InspectionPlan) {
+    if (!settings) return
+    await work(async () => {
+      const client = await choose({ action: 'save', title: '巡检设置保存到哪里？', from: settings.source })
+      if (!client) return
+      if (client.mode === 'local' && values.enabled)
+        throw new Error('浏览器无法离线调度，请关闭定时或选择云端 / 自建 Worker')
+      const copied = await copyProject(owner(settings.source), settings, client)
+      await saveInspectionPlan(client, copied.id, values)
+      setSelected(recordKey({ ...copied, source: sourceID(client) }))
+      setSettings(undefined)
+    })
+  }
+  async function changeProtocol(ch: ProjectChannel, protocol: string) {
+    if (!project) return
+    await work(async () => {
+      const dest = await destination(project, 'save', '渠道测试协议保存到哪里？')
+      if (!dest) return
+      await saveInspectionChannelProtocol(dest.client, dest.project.id, ch.id, protocol)
+    })
+  }
+  async function sync(values: { import_keys: boolean; two_factor_code: string }) {
+    if (!syncProject) return
+    await work(async () => {
+      const dest = await destination(syncProject, 'execute', '在哪里同步并保存渠道？', true)
+      if (!dest) return
+      const result = await syncInspectionProject(dest.client, dest.project.id, values)
+      if (result.last_error) setError(result.last_error)
+      setSyncProject(undefined)
+      syncForm.resetFields()
     })
   }
   async function importKeys(values: { code: string }) {
-    if (!channelDetail) return
-    setBusy('import-keys'); setKeyError('')
-    try {
-      const updated = await importInspectionKeys(token, channelDetail.id, selectedChannels, values.code || '')
-      setProjects((current) => current.map((project) => project.id === updated.id ? updated : project))
-      const errors = updated.channels.filter((ch) => selectedChannels.includes(ch.id) && ch.key_error)
-      if (errors.length) {
-        setKeyError(`${errors.length} 个渠道导入失败：${errors.map((ch) => `${ch.name} (#${ch.id})：${ch.key_error}`).join('；')}。成功项已保存。`)
-        setSelectedChannels(errors.map((ch) => ch.id))
-      } else {
-        setKeyDialog(false); setSelectedChannels([])
-        void message.success('渠道密钥已加密保存')
-      }
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) onExpired()
-      else setKeyError(err instanceof Error ? err.message : '密钥导入失败')
-    } finally {
-      keyForm.resetFields(); setBusy('')
-    }
-  }
-  async function runProjectNow(projectID: string) {
-    await action(`run-${projectID}`, async () => {
-      const run = await runInspectionProject(token, projectID)
-      setRunID(run.id)
+    if (!keyProject) return
+    await work(async () => {
+      const dest = await destination(keyProject, 'save', '渠道密钥保存到哪里？', true)
+      if (!dest) return
+      const result = await importInspectionKeys(dest.client, dest.project.id, selectedChannels, values.code)
+      const failures = result.channels.filter((ch) => selectedChannels.includes(ch.id) && ch.key_error)
+      if (failures.length) setError(failures.map((ch) => `${ch.name}：${ch.key_error}`).join('；'))
+      setKeyProject(undefined)
+      keyForm.resetFields()
     })
   }
-
-  async function batchRun() {
-    await action('batch-run', async () => {
-      const response = await runInspectionBatch(token, selectedProjects)
-      const failed = response.outcomes.filter((outcome) => outcome.error)
-      const created = response.outcomes.filter((outcome) => outcome.run_id).length
-      if (failed.length) setError(`已启动 ${created} 个项目；${failed.map((item) => `${projects.find((p) => p.id === item.project_id)?.name || item.project_id}：${item.error}`).join('；')}`)
-      else void message.success(`已启动 ${created} 个项目的巡检批次`)
-    })
+  const visible =
+    project?.channels.filter((ch) => (!group || ch.groups.includes(group)) && (!tag || ch.tag === tag)) || []
+  function reportRows(p: InspectionProject, ch: ProjectChannel) {
+    const rows = histories.get(`${p.source}:${p.id}:${ch.id}`) || []
+    const latestID = rows[0]?.run.id
+    const latest = rows.filter((row) => row.run.id === latestID)
+    return (
+      <Space orientation="vertical" size={0}>
+        {!latest.length ? (
+          <Text type="secondary">未检查</Text>
+        ) : (
+          latest.map(({ run, item }) => (
+            <span key={item.evaluator}>
+              <Tag
+                color={item.status === 'completed' ? 'success' : item.status === 'running' ? 'processing' : 'warning'}
+              >
+                {engines.find((e) => e.id === item.evaluator)?.name || item.evaluator} ·{' '}
+                {statuses[item.status] || item.status}
+              </Tag>
+              <Text type="secondary">{date(run.created_at)}</Text>
+            </span>
+          ))
+        )}
+        <Button size="small" type="link" onClick={() => setReport({ project: p, channel: ch })}>
+          更多
+        </Button>
+      </Space>
+    )
   }
-
-  async function changeChannelProtocol(channelID: string, protocol: string) {
-    if (!channelDetail) return
-    setBusy(`protocol-${channelID}`); setChannelError('')
-    try {
-      const updated = await saveInspectionChannelProtocol(token, channelDetail.id, channelID, protocol)
-      setProjects((current) => current.map((project) => project.id === updated.id ? updated : project))
-      void message.success('测试协议已保存，仅影响本服务巡检')
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) onExpired()
-      else setChannelError(err instanceof Error ? err.message : '测试协议保存失败')
-    } finally { setBusy('') }
-  }
-
-  const channelColumns = [
-    { title: '渠道', key: 'name', width: 220, render: (_: unknown, ch: ProjectChannel) => <Space orientation="vertical" size={2} style={{ width: '100%', minWidth: 0 }}><Text strong ellipsis={{ tooltip: `${ch.name} · #${ch.id}` }}>{ch.name} · #{ch.id}</Text><Text type="secondary" ellipsis={{ tooltip: ch.base_url || '无地址' }}>{ch.base_url || '无地址'}</Text></Space> },
-    { title: '所属分组', key: 'groups', width: 160, render: (_: unknown, ch: ProjectChannel) => <Space wrap>{ch.groups.map((g) => <Tag key={g}>{g}</Tag>)}</Space> },
-    { title: '标签', key: 'tag', width: 180, render: (_: unknown, ch: ProjectChannel) => ch.tag ? <Text style={{ display: 'block', maxWidth: '100%' }} ellipsis={{ tooltip: ch.tag }}>{ch.tag}</Text> : '—' },
-    { title: '测试协议', key: 'protocol', width: 230, render: (_: unknown, ch: ProjectChannel) => <Space orientation="vertical" size={4} style={{ width: '100%', minWidth: 0 }}>
-      <Select aria-label={`渠道 ${ch.id} 的测试协议`} style={{ width: '100%' }} disabled={channelDetail?.busy || Boolean(busy)} loading={busy === `protocol-${ch.id}`} value={ch.protocol_override || ''} onChange={(protocol) => void changeChannelProtocol(ch.id, protocol)} options={[
-        { value: '', label: `跟随渠道：${protocolLabels[ch.protocol] || ch.protocol || '未识别'}` },
-        { value: 'chat_completions', label: protocolLabels.chat_completions },
-        { value: 'responses', label: protocolLabels.responses },
-        { value: 'messages', label: protocolLabels.messages },
-      ]} />
-      {ch.protocol_override && <Text type="secondary">同步协议：{protocolLabels[ch.protocol] || ch.protocol || '未识别'}</Text>}
-      {ch.organization && <Tag>已配置 OpenAI Organization</Tag>}
-    </Space> },
-    { title: '可用性', key: 'state', width: 130, render: (_: unknown, ch: ProjectChannel) => <Space orientation="vertical" size={4} style={{ width: '100%', minWidth: 0 }}><Tag color={ch.enabled ? 'success' : 'default'}>{ch.enabled ? '启用' : '停用'}</Tag>{ch.issue && <Text type="danger">{ch.issue}</Text>}</Space> },
-    { title: '密钥状态', key: 'key', width: 150, render: (_: unknown, ch: ProjectChannel) => <Space orientation="vertical" size={4} style={{ width: '100%', minWidth: 0 }}><Tag color={ch.key_error ? 'error' : ch.has_key ? 'success' : 'warning'}>{ch.key_error ? '导入失败' : ch.has_key ? '已导入密钥' : '尚未导入密钥'}</Tag>{ch.key_error && <Text type="danger">{ch.key_error}</Text>}</Space> },
-    { title: '模型', key: 'models', width: 300, render: (_: unknown, ch: ProjectChannel) => <Space orientation="vertical" size={2} style={{ width: '100%', minWidth: 0 }}><Text ellipsis={{ tooltip: ch.models.join('、') }}>{ch.models.join('、') || '未配置模型'}</Text>{ch.multi_key && <Text type="secondary" ellipsis={{ tooltip: '多 Key：导入第一个可用 Key' }}>多 Key：导入第一个可用 Key</Text>}</Space> },
-  ]
-
-  return <Layout className="app-layout">
-
-    <Layout className="inspection-layout">
-      <Sider width={220} theme="light" className="inspection-sider">
-        <nav aria-label="巡检任务导航" className="inspection-sidebar-nav">
-          <div className="inspection-sidebar-add"><Button type="primary" block icon={<PlusOutlined />} disabled={Boolean(busy)} onClick={() => edit()}>添加项目</Button></div>
-          <Menu aria-label="任务日志导航" mode="inline" selectedKeys={channelID ? [] : ['logs']} disabled={Boolean(busy)} items={[{ key: 'logs', label: '任务日志', icon: <FileTextOutlined /> }]} onClick={() => selectProject()} />
-          <Text type="secondary" className="inspection-sidebar-label">项目 · {projects.length}</Text>
-          <div className="inspection-project-menu">
-            <Menu aria-label="项目列表" mode="inline" selectedKeys={channelID ? [channelID] : []} disabled={Boolean(busy)} items={projects.map((project) => ({ key: project.id, icon: <ApiOutlined />, label: <span title={project.name}>{project.name}</span> }))} onClick={({ key }) => selectProject(key)} />
-            {loaded && !projects.length && <Text type="secondary" className="inspection-sidebar-empty">暂无项目，点击上方添加。</Text>}
-          </div>
-        </nav>
-      </Sider>
-      <Content className="inspection-main">
-        {error && <Alert type="error" title={error} showIcon closable onClose={() => setError('')} />}
-        {channelDetail ? <Card className="inspection-project-panel" title={<Space wrap><Text strong>{channelDetail.name}</Text><Tag>{channelDetail.kind === 'newapi' ? 'New API' : channelDetail.kind}</Tag><Badge status={channelDetail.busy ? 'processing' : channelDetail.plan.enabled ? 'success' : 'default'} text={channelDetail.busy ? '执行中' : channelDetail.plan.enabled ? '定时已启用' : '手动运行'} /></Space>}>
-          <Flex gap={8} wrap align="center" className="inspection-project-actions">
-            <Button icon={<LinkOutlined />} disabled={channelDetail.busy || Boolean(busy)} onClick={() => edit(channelDetail)}>连接</Button>
-            <Button icon={<SettingOutlined />} disabled={!enginesLoaded || channelDetail.busy || Boolean(busy)} onClick={() => openSettings(channelDetail)}>设置</Button>
-            <Button icon={<CloudSyncOutlined />} disabled={channelDetail.busy || Boolean(busy)} loading={busy === 'sync-project'} onClick={() => openSync(channelDetail.id)}>立即同步</Button>
-            <Popconfirm title="删除此项目连接、计划与已导入密钥？" description="已完成的批次记录保留。" onConfirm={() => action(`delete-${channelDetail.id}`, async () => {
-              await deleteInspectionProject(token, channelDetail.id)
-              setSelectedProjects((ids) => ids.filter((id) => id !== channelDetail.id))
-              if (settingsID === channelDetail.id) setSettingsID(undefined)
-              selectProject()
-            })} okText="删除" cancelText="取消"><Button danger icon={<DeleteOutlined />} disabled={channelDetail.busy || Boolean(busy)}>删除</Button></Popconfirm>
-            <Popconfirm title="确认立即巡检？" description="将按当前设置向已选渠道发起真实模型请求，可能消耗额度。" onConfirm={() => void runProjectNow(channelDetail.id)} okText="确认巡检" cancelText="取消"><Button type="primary" icon={<PlayCircleOutlined />} disabled={channelDetail.busy || Boolean(busy) || !channelDetail.synced_at} loading={busy === `run-${channelDetail.id}`}>立即巡检</Button></Popconfirm>
-          </Flex>
-          <Descriptions size="small" column={{ xs: 1, md: 2, xl: 3 }} className="inspection-project-meta" items={[
-            { key: 'url', label: '项目地址', children: channelDetail.base_url },
-            { key: 'synced', label: '同步时间', children: formatTime(channelDetail.synced_at) },
-            { key: 'next', label: '下次巡检', children: channelDetail.plan.enabled ? `${formatTime(channelDetail.next_run_at)}（每 ${channelDetail.plan.interval_minutes} 分钟）` : '未启用' },
-          ]} />
-          {channelDetail.last_error && <Alert type="error" showIcon title={channelDetail.last_error} />}
-          {channelError && <Alert type="error" showIcon title={channelError} />}
-          <Flex justify="space-between" align="center" wrap gap={8} className="inspection-channel-heading"><Title level={4}>渠道</Title><Text type="secondary">{channelDetail.groups.length} 个分组 · {channelDetail.channels.length} 个渠道 · {channelDetail.channels.filter((channel) => channel.has_key).length} 个已导入密钥</Text></Flex>
-        <Flex gap={12} align="center" wrap className="inspection-toolbar">
-          <Select aria-label="按所属分组筛选渠道" allowClear showSearch optionFilterProp="label" placeholder="全部分组" value={channelGroup} style={{ minWidth: 180 }} disabled={channelDetail.busy || Boolean(busy)} onChange={(group) => { setChannelGroup(group); setChannelPage(1); setSelectedChannels([]) }} options={channelDetail.groups.map((group) => ({ value: group, label: group }))} />
-          <Select aria-label="按渠道标签筛选" allowClear showSearch optionFilterProp="label" placeholder="全部标签" value={channelTag} style={{ minWidth: 180 }} disabled={channelDetail.busy || Boolean(busy)} onChange={(tag) => { setChannelTag(tag); setChannelPage(1); setSelectedChannels([]) }} options={[...new Set(channelDetail.channels.map((ch) => ch.tag).filter((tag): tag is string => Boolean(tag)))].sort().map((tag) => ({ value: tag, label: tag }))} />
-          <Button icon={<KeyOutlined />} disabled={channelDetail.busy || Boolean(busy) || !selectedChannels.length} onClick={() => { keyForm.resetFields(); setKeyError(''); setKeyDialog(true) }}>导入选中渠道的密钥（{selectedChannels.length}）</Button>
-        </Flex>
-        <Table<ProjectChannel> rowKey="id" size="small" tableLayout="fixed" dataSource={visibleChannels} columns={channelColumns} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={channelDetail.synced_at ? '没有符合筛选条件的渠道' : '点击上方“立即同步”获取该项目的渠道。'} /> }} rowSelection={{ selectedRowKeys: selectedChannels, onChange: (keys) => setSelectedChannels(keys.map(String)), getCheckboxProps: (ch) => ({ disabled: !ch.enabled || Boolean(ch.issue) || channelDetail.busy || Boolean(busy) }) }} pagination={{ current: channelPage, pageSize: channelPageSize, total: visibleChannels.length, showSizeChanger: true, pageSizeOptions: [10, 20, 50], showTotal: (total) => `共 ${total} 个渠道`, onChange: (page, size) => { setChannelPage(size === channelPageSize ? page : 1); setChannelPageSize(size) } }} scroll={{ x: 1420 }} />
-        </Card> : <>
-          <Flex justify="space-between" align="center" wrap gap={16} className="page-heading">
-            <div><Title level={1}>任务日志</Title><Text type="secondary">查看各项目的巡检批次与执行结果。</Text></div>
-            <Button icon={<ReloadOutlined />} disabled={Boolean(busy)} onClick={() => setRevision((n) => n + 1)}>刷新</Button>
-          </Flex>
-      <Card className="inspection-log-panel" loading={!loaded} title="巡检批次" extra={<Select allowClear value={runProject} onChange={setRunProject} placeholder="按项目筛选" options={[...new Map(runs.map((run) => [run.project_id, { value: run.project_id, label: run.project_name }])).values()]} style={{ width: 200 }} />}>
-        <Flex gap={12} wrap align="center" className="inspection-batch-toolbar">
-          <Select mode="multiple" allowClear aria-label="批量巡检项目" placeholder="选择要批量巡检的项目" className="inspection-batch-select" value={selectedProjects} disabled={!projects.length || Boolean(busy)} maxTagCount="responsive" onChange={setSelectedProjects} options={projects.map((project) => ({ value: project.id, label: project.name, disabled: project.busy }))} />
-          <Popconfirm title="确认批量立即巡检？" description="将按各项目当前设置发起真实模型请求，可能消耗额度。" onConfirm={() => void batchRun()} okText="确认巡检" cancelText="取消"><Button icon={<PlayCircleOutlined />} disabled={!selectedProjects.length || Boolean(busy)} loading={busy === 'batch-run'}>批量立即巡检（{selectedProjects.length}）</Button></Popconfirm>
-        </Flex>
-        <Table rowKey="id" size="small" dataSource={runs.filter((run) => !runProject || run.project_id === runProject)} pagination={{ pageSize: 10 }} scroll={{ x: 760 }} columns={[
-          { title: '项目 / 批次', key: 'project', render: (_, run) => <Space orientation="vertical" size={0}><Text strong>{run.project_name}</Text><Text type="secondary">{run.id}</Text></Space> },
-          { title: '触发', dataIndex: 'trigger', render: (value: string) => value === 'schedule' ? '定时' : '手动' },
-          { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={value === 'completed' ? 'success' : value === 'running' ? 'processing' : 'warning'}>{statusLabels[value] || value}</Tag> },
-          { title: '进度', key: 'progress', render: (_, run) => `${run.items.filter((i) => !['pending', 'running'].includes(i.status)).length}/${run.items.length}` },
-          { title: '创建时间', dataIndex: 'created_at', render: formatTime },
-          { title: '操作', key: 'action', render: (_, run) => <Button type="link" onClick={() => setRunID(run.id)}>查看结果</Button> },
-        ]} />
-      </Card>
-        </>}
-      </Content>
+  return (
+    <Layout>
+      <Layout className="inspection-layout">
+        <Layout.Sider width={240} theme="light" className="inspection-sider">
+          <Button block type="primary" icon={<PlusOutlined />} disabled={busy} onClick={() => openConnection()}>
+            添加项目
+          </Button>
+          <Menu
+            selectedKeys={project ? [recordKey(project)] : []}
+            items={[
+              ...projects.map((item) => ({
+                key: recordKey(item),
+                icon: <ApiOutlined />,
+                label: (
+                  <span>
+                    {item.name}
+                    <small style={{ display: 'block' }}>{label(item.source)}</small>
+                  </span>
+                ),
+              })),
+            ]}
+            onClick={({ key }) => {
+              setSelected(key)
+              setSelectedChannels([])
+              setGroup(undefined)
+              setTag(undefined)
+            }}
+          />
+        </Layout.Sider>
+        <Layout.Content className="inspection-main">
+          {errors.map((message) => (
+            <Alert key={message} type="warning" title={message} action={<Button onClick={refresh}>重试</Button>} />
+          ))}
+          {error && <Alert type="error" showIcon title={error} closable onClose={() => setError('')} />}
+          {projects.length > 1 && (
+              <Flex gap={12} wrap className="inspection-batch-toolbar">
+                <Select
+                  mode="multiple"
+                  aria-label="批量巡检项目"
+                  value={batchProjects}
+                  onChange={setBatchProjects}
+                  style={{ minWidth: 300 }}
+                  placeholder="选择项目"
+                  options={projects.map((p) => ({
+                    value: recordKey(p),
+                    label: `${p.name} · ${label(p.source)}`,
+                    disabled: p.busy,
+                  }))}
+                />
+                <Button disabled={busy || !batchProjects.length} onClick={() => void batchRun()}>
+                  批量立即巡检
+                </Button>
+              </Flex>
+          )}
+          {project ? (
+            <Card
+              title={
+                <Space>
+                  {project.name}
+                  <SourceTag source={project.source} />
+                </Space>
+              }
+            >
+              <Space wrap className="inspection-project-actions">
+                <Button icon={<LinkOutlined />} disabled={busy} onClick={() => openConnection(project)}>
+                  连接
+                </Button>
+                <Button
+                  icon={<SettingOutlined />}
+                  disabled={busy || project.busy}
+                  onClick={() => openSettings(project)}
+                >
+                  设置
+                </Button>
+                <Button
+                  icon={<CloudSyncOutlined />}
+                  disabled={busy || project.busy}
+                  onClick={() => {
+                    syncForm.resetFields()
+                    syncForm.setFieldsValue({ import_keys: true, two_factor_code: '' })
+                    setSyncProject(project)
+                  }}
+                >
+                  立即同步
+                </Button>
+                <Popconfirm
+                  title="删除该来源的项目连接？"
+                  description="历史批次保留"
+                  onConfirm={() =>
+                    work(async () => {
+                      await deleteInspectionProject(owner(project.source), project.id)
+                      setSelected(undefined)
+                    })
+                  }
+                >
+                  <Button danger icon={<DeleteOutlined />} disabled={busy || project.busy}>
+                    删除
+                  </Button>
+                </Popconfirm>
+                <Button
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  disabled={busy || project.busy || !project.synced_at}
+                  onClick={() => void run(project)}
+                >
+                  立即巡检
+                </Button>
+              </Space>
+              <Descriptions
+                className="inspection-project-meta"
+                items={[
+                  { key: 'base', label: '项目地址', children: project.base_url },
+                  { key: 'synced', label: '同步时间', children: date(project.synced_at) },
+                  {
+                    key: 'next',
+                    label: '下次巡检',
+                    children: project.plan.enabled ? date(project.next_run_at) : '未启用',
+                  },
+                ]}
+              />
+              {project.last_error && <Alert type="error" title={project.last_error} />}
+              <Flex gap={12} wrap className="inspection-toolbar">
+                <Select
+                  allowClear
+                  placeholder="全部分组"
+                  value={group}
+                  onChange={setGroup}
+                  style={{ width: 180 }}
+                  options={project.groups.map((value) => ({ value, label: value }))}
+                />
+                <Select
+                  allowClear
+                  placeholder="全部标签"
+                  value={tag}
+                  onChange={setTag}
+                  style={{ width: 180 }}
+                  options={[...new Set(project.channels.map((ch) => ch.tag).filter(Boolean))].map((value) => ({
+                    value,
+                    label: value,
+                  }))}
+                />
+                <Button
+                  icon={<KeyOutlined />}
+                  disabled={!selectedChannels.length || busy}
+                  onClick={() => setKeyProject(project)}
+                >
+                  导入选中渠道密钥
+                </Button>
+              </Flex>
+              <Table<ProjectChannel>
+                rowKey="id"
+                dataSource={visible}
+                size="small"
+                scroll={{ x: 1560 }}
+                pagination={{ pageSize: 10, showSizeChanger: true }}
+                rowSelection={{
+                  selectedRowKeys: selectedChannels,
+                  onChange: (keys) => setSelectedChannels(keys.map(String)),
+                  getCheckboxProps: (ch) => ({ disabled: !ch.enabled || Boolean(ch.issue) || busy }),
+                }}
+                columns={[
+                  {
+                    title: '渠道',
+                    width: 220,
+                    render: (_, ch) => (
+                      <Space orientation="vertical" size={0}>
+                        <Text strong>
+                          {ch.name} · #{ch.id}
+                        </Text>
+                        <Text type="secondary">{ch.base_url}</Text>
+                        <SourceTag source={project.source} />
+                      </Space>
+                    ),
+                  },
+                  { title: '分组', dataIndex: 'groups', width: 170, render: (values: string[]) => values.join('、') },
+                  { title: '标签', dataIndex: 'tag', width: 170 },
+                  {
+                    title: '测试协议',
+                    width: 190,
+                    render: (_, ch) => (
+                      <Select
+                        style={{ width: '100%' }}
+                        aria-label={`渠道 ${ch.id} 的测试协议`}
+                        disabled={busy || project.busy}
+                        value={ch.protocol_override || ''}
+                        onChange={(value) => void changeProtocol(ch, value)}
+                        options={[
+                          { value: '', label: `跟随渠道：${protocols[ch.protocol] || ch.protocol}` },
+                          ...Object.entries(protocols).map(([value, label]) => ({ value, label })),
+                        ]}
+                      />
+                    ),
+                  },
+                  {
+                    title: '状态',
+                    width: 140,
+                    render: (_, ch) => (
+                      <Space orientation="vertical">
+                        <Tag color={ch.enabled ? 'success' : 'default'}>{ch.enabled ? '启用' : '停用'}</Tag>
+                        {ch.issue && <Text type="danger">{ch.issue}</Text>}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: '密钥',
+                    width: 150,
+                    render: (_, ch) => (
+                      <Space orientation="vertical">
+                        <Tag color={ch.has_key ? 'success' : 'warning'}>{ch.has_key ? '已保存' : '未导入'}</Tag>
+                        {ch.key_error && <Text type="danger">{ch.key_error}</Text>}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: '模型',
+                    width: 230,
+                    render: (_, ch) => <Text ellipsis={{ tooltip: ch.models.join('、') }}>{ch.models.join('、')}</Text>,
+                  },
+                  { title: '测试报告', width: 280, render: (_, ch) => reportRows(project, ch) },
+                ]}
+              />
+            </Card>
+          ) : (
+            <Card loading={loading}><Empty description="还没有项目，点击左侧“添加项目”开始配置。" /></Card>
+          )}
+        </Layout.Content>
+      </Layout>
+      <Drawer
+        title={editor?.project ? '编辑项目连接' : '添加 New API 项目'}
+        open={Boolean(editor)}
+        onClose={() => setEditor(undefined)}
+        size={600}
+        extra={
+          <Button type="primary" onClick={() => connectionForm.submit()} loading={busy}>
+            保存
+          </Button>
+        }
+      >
+        <Form
+          name="project-connection"
+          form={connectionForm}
+          layout="vertical"
+          onFinish={saveConnection}
+          disabled={busy}
+        >
+          <Form.Item name="name" label="项目名称" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="base_url" label="New API 地址" rules={[{ required: true, type: 'url' }]}>
+            <Input placeholder="https://newapi.example.com" />
+          </Form.Item>
+          <Form.Item name="kind" hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item label="管理员身份">
+            <Radio.Group
+              value={identity}
+              onChange={(event) => setIdentity(event.target.value)}
+              options={[
+                { value: 'account', label: '账号 / 邮箱' },
+                { value: 'id', label: 'User ID' },
+              ]}
+            />
+          </Form.Item>
+          {identity === 'account' ? (
+            <>
+              <Form.Item name="admin_account" label="管理员账号 / 邮箱" rules={[{ required: true }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="password" label="管理员密码（新连接必填，编辑留空保留）">
+                <Input.Password autoComplete="off" />
+              </Form.Item>
+              <Form.Item name="login_code" label="登录 2FA（如果要求）">
+                <Input.Password autoComplete="one-time-code" />
+              </Form.Item>
+            </>
+          ) : (
+            <Form.Item name="user_id" label="管理员 User ID" rules={[{ required: true }]}>
+              <InputNumber min={1} />
+            </Form.Item>
+          )}
+          <Form.Item name="access_token" label="管理员 Access Token" rules={[{ required: !editor?.project }]}>
+            <Input.Password autoComplete="off" placeholder={editor?.project ? '留空保留原凭据' : ''} />
+          </Form.Item>
+          <Alert
+            type="info"
+            title="保存时选择存储位置"
+            description="账号解析需要访问 New API；选择浏览器本地时由本机 Worker 完成。密码和验证码不保存。"
+          />
+        </Form>
+      </Drawer>
+      <Drawer title="巡检设置" open={Boolean(settings)} onClose={() => setSettings(undefined)} size={600}>
+        <Form name="project-plan" form={planForm} layout="vertical" onFinish={savePlan} disabled={busy}>
+          <Form.Item name="mode" label="渠道范围">
+            <Select
+              options={[
+                { value: 'all', label: '全部渠道' },
+                { value: 'groups', label: '指定分组' },
+                { value: 'channels', label: '指定渠道' },
+              ]}
+            />
+          </Form.Item>
+          {planMode === 'groups' && (
+            <Form.Item name="groups" label="分组">
+              <Select mode="multiple" options={settings?.groups.map((value) => ({ value, label: value }))} />
+            </Form.Item>
+          )}
+          {planMode === 'channels' && (
+            <Form.Item name="channel_ids" label="渠道">
+              <Select mode="multiple" options={settings?.channels.map((ch) => ({ value: ch.id, label: ch.name }))} />
+            </Form.Item>
+          )}
+          <Form.Item name="models" label="模型 ID（留空使用渠道模型）">
+            <Select mode="tags" tokenSeparators={[',', ' ', '\n']} />
+          </Form.Item>
+          <Form.Item name="evaluators" label="巡检引擎" rules={[{ required: true, type: 'array', min: 1 }]}>
+            <Checkbox.Group options={engines.map((e) => ({ value: e.id, label: e.name }))} />
+          </Form.Item>
+          {engines
+            .filter((e) => planEngines.includes(e.id))
+            .map((e) => (
+              <div key={e.id}>
+                {e.options?.map((option) => (
+                  <Form.Item
+                    key={option.key}
+                    name={['evaluator_options', e.id, option.key]}
+                    label={`${e.name} · ${option.label}`}
+                    initialValue={option.default}
+                  >
+                    {option.kind === 'select' ? (
+                      <Select options={option.choices} />
+                    ) : (
+                      <InputNumber min={option.min} max={option.max} />
+                    )}
+                  </Form.Item>
+                ))}
+              </div>
+            ))}
+          <Form.Item name="interval_minutes" label="执行间隔（分钟）">
+            <InputNumber min={1} max={10080} />
+          </Form.Item>
+          <Form.Item name="enabled" label="启用定时巡检（云端或自建 Worker）" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" icon={<CalendarOutlined />}>
+            保存设置
+          </Button>
+        </Form>
+      </Drawer>
+      <Modal
+        title="同步渠道"
+        open={Boolean(syncProject)}
+        onCancel={() => setSyncProject(undefined)}
+        onOk={() => syncForm.submit()}
+        confirmLoading={busy}
+        okText="选择位置并同步"
+      >
+        <Form name="project-sync" form={syncForm} layout="vertical" onFinish={sync}>
+          <Form.Item name="import_keys" valuePropName="checked">
+            <Checkbox>同时导入渠道 Key</Checkbox>
+          </Form.Item>
+          <Form.Item name="two_factor_code" label="导入 Key 时填写当前 2FA 验证码">
+            <Input.Password autoComplete="one-time-code" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title="导入渠道密钥"
+        open={Boolean(keyProject)}
+        onCancel={() => setKeyProject(undefined)}
+        onOk={() => keyForm.submit()}
+        confirmLoading={busy}
+        okText="选择保存位置"
+      >
+        <Form name="project-keys" form={keyForm} layout="vertical" onFinish={importKeys}>
+          <Form.Item
+            name="code"
+            label="管理员当前 2FA 验证码"
+            rules={[{ required: true, pattern: /^\d{6}$/, message: '请输入 6 位验证码' }]}
+          >
+            <Input.Password autoComplete="one-time-code" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Drawer
+        title={
+          <Space>
+            测试报告 · {report?.channel.name}
+            <SourceTag source={report?.project.source} />
+          </Space>
+        }
+        open={Boolean(report)}
+        onClose={() => setReport(undefined)}
+        size={1000}
+      >
+        <Table<{ run: BatchRun; item: BatchRun['items'][number] }>
+          rowKey={(row) => `${row.run.id}:${row.item.evaluator}`}
+          dataSource={history}
+          pagination={{ pageSize: 10 }}
+          columns={[
+            { title: '时间', render: (_, row) => date(row.run.created_at) },
+            {
+              title: '引擎',
+              render: (_, row) => engines.find((e) => e.id === row.item.evaluator)?.name || row.item.evaluator,
+            },
+            { title: '模型', render: (_, row) => row.item.models.join('、') },
+            { title: '状态', render: (_, row) => statuses[row.item.status] || row.item.status },
+            { title: '错误', render: (_, row) => row.item.error || row.item.result?.error || '—' },
+            {
+              title: '详情',
+              render: (_, row) => <Button onClick={() => onOpenLogs({ kind: 'batch', id: row.run.id, source: row.run.source })}>查看批次</Button>,
+            },
+          ]}
+        />
+      </Drawer>
+      <Layout.Footer className="app-footer">
+        各来源分别保存项目和最近 50 个批次；浏览器本地仅支持手动执行。
+      </Layout.Footer>
     </Layout>
-    <Footer className="app-footer">每个项目最多保留 50 个批次。重启后的定时计划从下一个间隔开始，未完成批次标记为中断。</Footer>
-
-    <Modal title="同步渠道" open={Boolean(syncID)} onCancel={() => { setSyncID(undefined); syncForm.resetFields() }} onOk={() => syncForm.submit()} confirmLoading={busy === 'sync-project'} okText="开始同步" cancelText="取消">
-      <Form form={syncForm} layout="vertical" onFinish={sync}>
-        <Form.Item name="import_keys" valuePropName="checked"><Checkbox>同步导入密钥</Checkbox></Form.Item>
-        <Form.Item noStyle shouldUpdate={(previous, current) => previous.import_keys !== current.import_keys}>
-          {({ getFieldValue }) => getFieldValue('import_keys') ? <Alert type="warning" showIcon style={{ marginBottom: 16 }} title="导入 Key 受目标 New API 的安全验证和限流保护" description="导入 Key 必须填写该管理员当前的 2FA 验证码。渠道较多时可能触发目标 New API 限流，成功项会保存，失败项可随后重试。只支持 Passkey 的账号无法由当前服务自动完成验证。" /> : null}
-        </Form.Item>
-        <Form.Item noStyle shouldUpdate={(previous, current) => previous.import_keys !== current.import_keys}>
-          {({ getFieldValue }) => getFieldValue('import_keys') ? <Form.Item name="two_factor_code" label="2FA验证码" rules={[{ required: true, message: '请输入 2FA 验证码' }, { pattern: /^\d{6}$/, message: '请输入 6 位验证码' }]}><Input.Password autoComplete="one-time-code" maxLength={6} /></Form.Item> : null}
-        </Form.Item>
-      </Form>
-    </Modal>
-
-    <Modal title={editor?.id ? '编辑项目连接' : '添加项目连接'} open={editor !== null} onCancel={() => { setEditor(null); configForm.resetFields() }} onOk={() => configForm.submit()} confirmLoading={busy === 'save-project'} okText="保存连接" cancelText="取消">
-      <Form form={configForm} layout="vertical" onFinish={saveConnection} requiredMark={false}>
-        <Form.Item name="kind" label="项目类型" rules={[{ required: true }]}><Select options={[{ value: 'newapi', label: 'New API' }]} /></Form.Item>
-        <Form.Item name="name" label="项目名称" rules={[{ required: true, whitespace: true, max: 100 }]}><Input placeholder="例如：生产 New API" /></Form.Item>
-        <Form.Item name="base_url" label="项目根地址" extra="填写管理站点根地址，不是 /v1 模型接口地址。" rules={[{ required: true }, { type: 'url' }]}><Input placeholder="https://newapi.example.com" autoComplete="off" /></Form.Item>
-        <Form.Item label="管理员识别方式"><Segmented value={identityMode} onChange={(value) => setIdentityMode(value as 'account' | 'id')} options={[{ label: '账号 / 邮箱', value: 'account' }, { label: '高级：User ID', value: 'id' }]} /></Form.Item>
-        {identityMode === 'account' ? <>
-          <Form.Item name="admin_account" label="管理员账号 / 邮箱" rules={[{ required: true, whitespace: true }]}><Input autoComplete="username" /></Form.Item>
-          <Form.Item name="password" label="登录密码（仅解析 ID，不保存）" extra={editor?.id ? '仅修改名称时可留空；更换账号、地址或令牌时需重新登录解析。' : '通过目标 New API 登录接口确认身份，不需手工查找 User ID。'} rules={[{ required: !editor?.id }]}><Input.Password autoComplete="off" /></Form.Item>
-          <Form.Item name="login_code" label="登录 2FA 验证码（若启用）"><Input.Password autoComplete="one-time-code" /></Form.Item>
-        </> : <Form.Item name="user_id" label="New-Api-User（管理员 User ID）" rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: '100%' }} /></Form.Item>}
-        <Form.Item name="access_token" label="管理员 Access Token" extra={editor?.id ? '留空保留原令牌；修改地址或用户时必须重新填写。' : '从 New API 个人设置获取管理访问令牌。普通 sk- 模型令牌不能管理渠道。'} rules={[{ required: !editor?.id }]}><Input.Password autoComplete="off" /></Form.Item>
-        <Alert type="info" showIcon title="凭据加密保存在本服务，接口不回显。保存连接不会自动发起模型调用。" />
-      </Form>
-    </Modal>
-
-    <Drawer title={`${settingsDetail?.name || '项目'} · 设置`} open={Boolean(settingsID)} onClose={() => setSettingsID(undefined)} width={760}>
-      {settingsDetail && <Form form={planForm} layout="vertical" disabled={settingsDetail.busy || Boolean(busy)} onFinish={(plan: InspectionPlan) => action('save-plan', async () => { await saveInspectionPlan(token, settingsDetail.id, { ...plan, evaluator_options: Object.fromEntries(Object.entries(plan.evaluator_options || {}).filter(([id]) => plan.evaluators.includes(id))) }); void message.success('设置已保存') })}>
-        <Form.Item name="mode" label="巡检范围"><Select options={[{ value: 'all', label: '全部启用渠道' }, { value: 'groups', label: '按分组选择渠道' }, { value: 'channels', label: '指定渠道' }]} /></Form.Item>
-        {planMode === 'groups' && <Form.Item name="groups" label="分组" rules={[{ required: true }]}><Select mode="multiple" options={settingsDetail.groups.map((group) => ({ value: group, label: group }))} /></Form.Item>}
-        {planMode === 'channels' && <Form.Item name="channel_ids" label="渠道" rules={[{ required: true }]}><Select mode="multiple" options={settingsDetail.channels.map((ch) => ({ value: ch.id, label: `${ch.name} (#${ch.id})`, disabled: !ch.enabled }))} /></Form.Item>}
-        <Form.Item name="models" label="限定模型 ID（可选）" extra="留空使用各渠道配置的全部模型；指定时取与该渠道模型列表的交集。模型映射后的上游 ID 会显示在渠道表中。"><Select mode="tags" tokenSeparators={[',', '，']} options={[...new Set(settingsDetail.channels.flatMap((ch) => ch.models))].map((model) => ({ value: model, label: model }))} /></Form.Item>
-        <Form.Item name="evaluators" label="巡检引擎" extra="与“巡检引擎”页面使用同一份引擎列表，可同时选择多个。" rules={[{ required: true, message: '至少选择一个巡检引擎' }]}>
-          {engines.length ? <Checkbox.Group options={[...engines.map((engine) => ({ value: engine.id, label: engine.name })), ...unavailablePlanEvaluatorIDs.map((id) => ({ value: id, label: `${id}（已停用，请取消勾选）` }))]} /> : <Alert type="warning" showIcon title="暂无可用巡检引擎" description="请确认服务端已注册检测引擎，并刷新页面重试。" />}
-        </Form.Item>
-        {unavailablePlanEvaluatorIDs.length > 0 && <Alert type="warning" showIcon title="计划包含当前未注册的引擎" description="请取消勾选已停用引擎，选择需要的检测方式后保存。" />}
-        {engines.filter((engine) => planEvaluatorIDs.includes(engine.id) && engine.options?.length).map((engine) => <Card key={engine.id} size="small" title={engine.name} className="inspection-engine-options">
-          {engine.options?.map((option) => <Form.Item key={option.key} name={['evaluator_options', engine.id, option.key]} label={option.label} initialValue={option.default} rules={[{ required: true, message: `请填写${option.label}` }]}>
-            {option.kind === 'select' ? <Select options={option.choices} /> : <InputNumber min={option.min} max={option.max} precision={0} style={{ width: '100%' }} />}
-          </Form.Item>)}
-        </Card>)}
-        <Form.Item name="interval_minutes" label="执行间隔（分钟）" rules={[{ required: true }]}><InputNumber min={1} max={10080} precision={0} /></Form.Item>
-        <Form.Item name="enabled" label="启用服务端定时巡检" valuePropName="checked"><Switch disabled={token.mode === 'local'} /></Form.Item>
-        <Alert type="warning" showIcon title={token.mode === 'local' ? '本地模式仅支持手动触发；配置和批次保存在浏览器，本机执行器负责运行。' : '启用后由云端按计划执行，关闭网页也不影响巡检。'} />
-        <Button className="inspection-actions" type="primary" htmlType="submit" icon={<CalendarOutlined />} loading={busy === 'save-plan'} disabled={!engines.length || unavailablePlanEvaluatorIDs.length > 0}>保存设置</Button>
-      </Form>}
-    </Drawer>
-
-    <Modal title="导入渠道密钥" open={keyDialog} closable={busy !== 'import-keys'} maskClosable={busy !== 'import-keys'} keyboard={busy !== 'import-keys'} cancelButtonProps={{ disabled: busy === 'import-keys' }} onCancel={() => { setKeyDialog(false); setKeyError(''); keyForm.resetFields() }} onOk={() => keyForm.submit()} confirmLoading={busy === 'import-keys'} okText={keyError ? '重新验证并导入' : '验证并导入'} cancelText="取消">
-      <Paragraph>通过 New API 正式的渠道 Key 接口读取并加密保存 {selectedChannels.length} 个渠道的密钥。项目的 Access Token 必须属于有权读取 Key 的 Root 管理员。</Paragraph>
-      <Paragraph type="secondary">导入 Key 必须填写该管理员当前的 6 位 2FA 验证码；已在另一个浏览器登录或验证不会替本服务完成验证。</Paragraph>
-      {keyError && <Alert type="error" showIcon title="密钥导入未完成" description={keyError} />}
-      <Form form={keyForm} layout="vertical" disabled={busy === 'import-keys'} onFinish={importKeys}><Form.Item name="code" label="该管理员当前的 2FA 验证码" rules={[{ required: true, message: '导入 Key 时必须填写 2FA 验证码' }, { pattern: /^\d{6}$/, message: '请输入 6 位验证码' }]}><Input.Password autoComplete="one-time-code" maxLength={6} placeholder="仅用于本次验证，不保存" /></Form.Item></Form>
-      <Text type="secondary">不支持绕过权限或 Passkey 验证。如果目标只允许 Passkey，请由 New API 管理员提供允许机器访问的正式接入方式。</Text>
-    </Modal>
-
-    <Drawer title={`批次详情 · ${currentRun?.project_name || ''}`} open={Boolean(runID)} onClose={() => setRunID(undefined)} width={1100}>
-      {currentRun && <Space orientation="vertical" size={20} style={{ width: '100%' }}>
-        <Descriptions column={2} items={[{ key: 'id', label: '批次 ID', children: currentRun.id }, { key: 'status', label: '状态', children: statusLabels[currentRun.status] }, { key: 'start', label: '创建', children: formatTime(currentRun.created_at) }, { key: 'end', label: '完成', children: formatTime(currentRun.completed_at) }]} />
-        {currentRun.error && <Alert type="error" title={currentRun.error} />}
-        <Table rowKey={(item) => `${item.channel_id}:${item.evaluator}`} size="small" pagination={false} dataSource={currentRun.items} scroll={{ x: 700 }} columns={[
-          { title: '渠道', dataIndex: 'channel_name' }, { title: '分组', dataIndex: 'groups', render: (groups: string[]) => groups.join('、') }, { title: '引擎', dataIndex: 'evaluator', render: (id: string) => engines.find((engine) => engine.id === id)?.name || id }, { title: '测试协议', dataIndex: 'protocol', render: (value?: string) => value ? protocolLabels[value] || value : '历史记录未保存' }, { title: '模型', dataIndex: 'models', render: (models: string[]) => models.join('、') }, { title: '状态', dataIndex: 'status', render: (status: string) => statusLabels[status] || status }, { title: '错误', dataIndex: 'error', render: (value?: string) => value ? <Text type="danger">{value}</Text> : '—' },
-        ]} />
-        <Results scans={currentRun.items.flatMap((item) => item.result ? [item.result] : [])} engines={engines} />
-      </Space>}
-    </Drawer>
-  </Layout>
+  )
 }

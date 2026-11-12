@@ -29,3 +29,7 @@ extensions/terminal-bench/.venv/
 **/__pycache__/
 
 /dist/
+
+# Private self-hosted Worker configuration and SQLite
+worker.env
+/worker-data/

@@ -21,10 +21,11 @@ const (
 )
 
 type Options struct {
-	API            string `json:"api"`
-	Strict         bool   `json:"strict"`
-	Count          int    `json:"count"`
-	TimeoutSeconds int    `json:"timeout_seconds"`
+	API            string            `json:"api"`
+	Strict         bool              `json:"strict"`
+	Count          int               `json:"count"`
+	TimeoutSeconds int               `json:"timeout_seconds"`
+	Challenges     []lmfpd.Challenge `json:"challenges,omitempty"`
 }
 
 type Candidate struct {
@@ -37,13 +38,17 @@ type Candidate struct {
 }
 
 type Sample struct {
-	ChallengeID   string  `json:"challenge_id"`
-	ExpectedCount int     `json:"expected_count"`
-	State         string  `json:"state"`
-	Count         int     `json:"count"`
-	FirstByteMS   *int64  `json:"first_byte_ms"`
-	ResponseModel *string `json:"response_model"`
-	Error         *string `json:"error"`
+	ChallengeID     string  `json:"challenge_id"`
+	Prompt          string  `json:"prompt,omitempty"`
+	Output          string  `json:"output"`
+	OutputTruncated bool    `json:"output_truncated,omitempty"`
+	ElapsedMS       *int64  `json:"elapsed_ms,omitempty"`
+	ExpectedCount   int     `json:"expected_count"`
+	State           string  `json:"state"`
+	Count           int     `json:"count"`
+	FirstByteMS     *int64  `json:"first_byte_ms"`
+	ResponseModel   *string `json:"response_model"`
+	Error           *string `json:"error"`
 }
 
 type Details struct {
@@ -91,6 +96,10 @@ func (Engine) Descriptor() evaluator.Descriptor {
 		Description:            "以随机整数回答识别参考库内最相似的模型候选；不是身份认证或智力评分。",
 		Default:                true,
 		RequiresExplicitModels: true,
+		Options: []evaluator.Option{
+			{Key: "count", Label: "样本数量", Kind: "number", Default: 3, Min: 1, Max: 3},
+			{Key: "timeout_seconds", Label: "请求超时（秒）", Kind: "number", Default: 120, Min: 1, Max: 3600},
+		},
 	}
 }
 
@@ -128,7 +137,13 @@ func (e *Engine) Run(ctx context.Context, target evaluator.Target) (reportOut ev
 		defer func() { runErr = errors.Join(runErr, stop()) }()
 		config.BaseURL = baseURL
 	}
-	result, err := detector.Detect(ctx, config)
+	var result *lmfpd.DetectResult
+	var elapsed []int64
+	if len(options.Challenges) > 0 {
+		result, elapsed = detectChallenges(ctx, config, options.Challenges, detector.Analyze)
+	} else {
+		result, err = detector.Detect(ctx, config)
+	}
 	if err != nil {
 		return evaluator.Report{}, fmt.Errorf("start Fingerpoint detection: %w", err)
 	}
@@ -143,12 +158,24 @@ func (e *Engine) Run(ctx context.Context, target evaluator.Target) (reportOut ev
 	}
 	for index, sample := range result.Samples {
 		item := Sample{State: sample.State, Count: sample.Count, ExpectedCount: sample.ExpectedCount, FirstByteMS: sample.FirstByteMs}
+		output := sample.RawText
+		if output == "" {
+			output = sample.Text
+		}
+		// Keep bounded, redacted evidence for the sample cards, never in logs.
+		runes := []rune(strings.ReplaceAll(output, target.Connection.APIKey, "[REDACTED]"))
+		item.OutputTruncated = len(runes) > 16384
+		item.Output = string(runes[:min(len(runes), 16384)])
+		if elapsed != nil {
+			item.ElapsedMS = &elapsed[index]
+		}
 		if sample.ResponseModel != nil {
 			value := strings.ReplaceAll(*sample.ResponseModel, target.Connection.APIKey, "[REDACTED]")
 			item.ResponseModel = &value
 		}
 		if index < len(result.Challenges) {
 			item.ChallengeID = result.Challenges[index].ID
+			item.Prompt = result.Challenges[index].Prompt
 		}
 		if sample.Error != nil {
 			value := strings.ReplaceAll(*sample.Error, target.Connection.APIKey, "[REDACTED]")
@@ -233,6 +260,12 @@ func parseOptions(raw json.RawMessage) (Options, error) {
 		if _, ok := fields["timeout_seconds"]; ok && supplied.TimeoutSeconds == 0 {
 			return Options{}, errors.New("fingerprint timeout_seconds must be from 1 to 3600")
 		}
+		if challenges, ok := fields["challenges"]; ok {
+			if string(challenges) == "null" || len(supplied.Challenges) == 0 {
+				return Options{}, errors.New("fingerprint challenges must contain 1 to 3 prompts")
+			}
+			options.Challenges = supplied.Challenges
+		}
 		if supplied.API != "" {
 			options.API = supplied.API
 		}
@@ -257,6 +290,21 @@ func parseOptions(raw json.RawMessage) (Options, error) {
 	}
 	if options.Strict && options.Count != 3 {
 		return Options{}, errors.New("strict fingerprint detection requires 3 samples")
+	}
+	if options.Challenges != nil {
+		if len(options.Challenges) != options.Count {
+			return Options{}, errors.New("fingerprint challenges must match count")
+		}
+		ids := map[string]bool{}
+		for _, challenge := range options.Challenges {
+			if strings.TrimSpace(challenge.ID) == "" || len(challenge.ID) > 128 || ids[challenge.ID] {
+				return Options{}, errors.New("fingerprint challenge IDs must be nonempty and unique")
+			}
+			if strings.TrimSpace(challenge.Prompt) == "" || len(challenge.Prompt) > 16000 || challenge.ExpectedCount < 292 || challenge.ExpectedCount > 332 {
+				return Options{}, errors.New("fingerprint challenge prompt or expected_count is invalid")
+			}
+			ids[challenge.ID] = true
+		}
 	}
 	if options.TimeoutSeconds == 0 {
 		options.TimeoutSeconds = 120

@@ -19,7 +19,7 @@ export type BenchInput = {
 export type BenchReadiness = { ready: boolean; checks: Array<{ name: string; ready: boolean; detail: string }> }
 export type BenchJob = Omit<BenchInput, 'api_key'> & {
   id: string
-  source?: 'local' | 'cloud'
+  source?: import('../../data/sources').SourceID
   dataset: string
   agent: string
   harbor_version: string

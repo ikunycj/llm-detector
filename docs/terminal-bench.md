@@ -52,7 +52,7 @@ Responses 对应 Harbor 的 `openai_responses` 格式，并由 Terminus-2 调用
 
 ## 结果和取消
 
-- 页面按题目显示等待、执行、通过、未通过、运行错误、中断/取消。
+- 「巡检日志」中的 Terminal Bench 详情按题目显示等待、执行、通过、未通过、运行错误、中断/取消；取消测试操作也在该详情中。
 - verifier 的 `reward=1` 显示通过；其他 reward 显示未通过；运行异常或没有 reward 显示运行错误。
 - 最终历史保存于 `DATA_DIR/terminal-bench/<job-id>/job.json`，不含 API Key。
 - 原始 Harbor 输出目录为同目录下的 `harbor/`；`input.json` 记录无密钥的固定运行参数。

@@ -1,6 +1,6 @@
 import type { Connection } from '../../api'
 
-export type ServiceSource = 'local' | 'cloud'
+export type ServiceSource = import('../../data/sources').SourceID
 
 export type ModelAPIConfig = Pick<Connection, 'protocol' | 'base_url' | 'api_key'> & {
   name: string

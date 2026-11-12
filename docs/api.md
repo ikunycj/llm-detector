@@ -5,7 +5,7 @@
 | 方法与路径 | 用途 | 成功状态 |
 | --- | --- | --- |
 | `GET /healthz` | 存活检查 `{"status":"ok"}` | 200 |
-| `POST /api/v1/auth/login` | 云端账号密码登录 | 200 |
+| `POST /api/v1/auth/login` | 云端访问密钥登录 | 200 |
 | `POST /api/v1/auth/logout` | 撤销当前会话，无响应体 | 204 |
 | `GET /api/v1/providers` | 当前注册的模型协议适配器 | 200 |
 | `GET /api/v1/evaluators` | 当前注册的巡检引擎 | 200 |
@@ -19,7 +19,7 @@
 ## 登录
 
 ```json
-{"username":"admin","password":"your-password"}
+{"key":"your-cloud-access-key"}
 ```
 
 响应示例（时间与 token 为示例）：
@@ -28,7 +28,7 @@
 {"token":"session-token","expires_at":"2026-11-10T12:00:00Z"}
 ```
 
-账号或密码错误为 401；会话过期、重启或注销后也返回 401。不存在的任务返回 404。登录 token 是唯一需要返回客户端的认证凭据，部署密钥与模型 API Key 不回显。
+访问密钥错误为 401；会话过期或注销后返回 401。SQLite 中有效会话在重启后继续可用。不存在的任务返回 404。登录 token 是唯一需要返回客户端的认证凭据，部署密钥与模型 API Key 不回显。
 
 ## 模型发现
 
@@ -134,3 +134,18 @@ Terminal Bench 示例：
 ## Terminal Bench
 
 `terminal-bench` evaluator 将 `/scans` 和项目巡检任务接到同一个 Harbor Service；也保留 `/api/v1/terminal-bench/*` 接口用于独立页面的进度、取消和历史查看。运行说明见 [Terminal Bench](terminal-bench.md)。
+
+
+## 统一位置与 Worker
+
+前端按选择的目标直连 `/api/v1`。Worker 使用 `Authorization: Bearer <WORKER_KEY>`，云端使用 24 小时账号会话，本机临时执行器使用来源绑定会话。
+
+- `GET /worker/info`：认证后返回 `protocol_version: 1`，用于添加 Worker 校验。
+- `POST /model-services/transfer`：body `{id}`。仅当前账号/Worker 的已认证显式传递操作返回模型 API 凭据；普通 `/model-services` 响应仍隐藏 Key。
+- `POST /inspection/projects/{id}/transfer`：返回一个项目连接、计划和渠道凭据快照，不含其他项目。
+- `POST /inspection/projects/import`：从快照创建新项目 ID，不覆盖已有项目，不复制历史，定时默认关闭。
+
+Worker 支持与云端相同的模型 API、扫描、项目、批次、Terminal Bench 路由。列表合并在浏览器执行，不由云端代访问自建 Worker。下载入口增加 `llm-detector-worker-{os}-{arch}.zip` 和 `install-worker.sh`。
+
+
+云端登录固定访问当前站点 `POST /api/v1/auth/login`，请求仅为 `{"key":"<APP_LOGIN_KEY>"}`。成功后返回 `token`、`expires_at`、`user`，原始访问密钥不回显。`CLOUD_ADMIN_USERNAME` 由服务器配置指定数据归属，不能通过登录参数选择其他账号。会话期限默认 24 小时。

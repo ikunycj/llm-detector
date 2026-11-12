@@ -1,4 +1,4 @@
-.PHONY: backend frontend install init-env test build clean terminal-bench-install
+.PHONY: backend frontend install init-env test build clean terminal-bench-install local-runner-build worker worker-build
 
 init-env:
 	python3 scripts/init_env.py
@@ -29,3 +29,9 @@ terminal-bench-install:
 
 local-runner-build:
 	python3 scripts/package_local.py
+
+worker:
+	go run ./cmd/worker
+
+worker-build:
+	python3 scripts/package_local.py --worker

@@ -2,21 +2,22 @@
 
 ## 项目目标与约定
 
-这是 Go + React 的模型智力检测 / 巡检项目。用户输入 URL、模型 API Key、厂商协议适配器后，对全部或指定模型运行可替换的检测引擎。本地模式不需要登录；云端模式使用 `.env` 中的初始账号配置创建 SQLite 账号。
+这是 Go + React 的模型智力检测 / 巡检项目。用户输入 URL、模型 API Key、厂商协议适配器后，对全部或指定模型运行可替换的检测引擎。页面无需登录，统一展示本地、云端和自建 Worker 数据；保存/执行时选择目标位置，云端按需登录。
 
-- `cmd/server` 是依赖装配与显式注册入口。
+- `cmd/server` 是云端入口，`cmd/worker` 是自建 Worker（默认 9003），`cmd/local-runner` 是本机临时执行入口（9002）。
+- `web/src/app/Locations.tsx` 提供全站保存/执行位置选择；数据身份使用来源和记录 ID，渠道还必须包含项目 ID。跨位置保存创建副本，不自动删除原件。
 - Terminal Bench 使用 `internal/terminalbench` 调度固定题单和独立 `extensions/terminal-bench` Harbor 环境。默认不运行真实评测；安装/检查不触发模型请求。API Key 不写入命令行或配置文件。
 - `pkg/provider` 定义模型发现与调用协议；`pkg/evaluator` 定义检测 SDK 契约。核心契约不得依赖具体厂商或评测 SDK。
 - `internal/providers`、`internal/evaluators` 放注册表和内置实现；新增第三方弱依赖按 `extensions/README.md` 与 `docs/plugin-sdk.md` 隔离。
 - `internal/httpapi` 负责未知输入校验；`internal/scan` 负责任务编排和 Store 契约；`internal/store` 是临时扫描的内存实现。
 - `internal/inspection` 负责服务器持久化的项目计划、加密凭据和批次；`pkg/project` / `internal/projects` 是远端项目适配边界。不要绕过 New API 权限或安全验证。
 - `web/src/features` 按业务组织界面；`web/src/api.ts` 和 `types.ts` 与后端 API 契约同步。
-- 当前不使用数据库或外部任务队列。生产巡检引擎统一注册 Fingerpoint Go SDK 和 Terminal Bench / Harbor；Smoke 仅保留为内部测试实现，不得重新加入用户引擎目录。
+- 云端和自建 Worker 使用独立的加密 SQLite；不使用外部任务队列。生产巡检引擎统一注册 Fingerpoint Go SDK 和 Terminal Bench / Harbor；Smoke 仅保留为内部测试实现，不得重新加入用户引擎目录。
 - 默认开发端口为前端 `9000`、后端 `9001`；涉及代理、启动命令或文档时保持一致。
-- 云端账号初始化只从项目根目录 `.env` 读取 `CLOUD_ADMIN_USERNAME` / `CLOUD_ADMIN_PASSWORD`；密码不得打印、提交或放入命令行参数。Make 启动目标先确保私有开发 `.env` 存在。
+- 云端登录密钥只从根目录 `.env` 的 `APP_LOGIN_KEY` 读取，数据账号由 `CLOUD_ADMIN_USERNAME` 指定；`CLOUD_ADMIN_PASSWORD` 仅用于新库初始化；密码不得打印、提交或放入命令行参数。Make 启动目标先确保私有开发 `.env` 存在。
 - 每次代码修改完成后，除非用户明确要求不要启动，否则都要使用项目根目录 `.env` 中的开发登录密钥启动并保持前端 `9000`、后端 `9001` 服务运行，供用户验收；启动后验证两个端口可访问。
 - 题库、提示词、判定方式变化时更新 evaluator 的检查说明或结果契约。调用错误不能伪装成模型智力低分。
-- 密钥、认证头、上游原始错误体不写入日志或任务结果。登录接口可以返回本次新建的会话 token；部署密钥和模型 API Key 不回显。
+- 密钥、认证头、上游原始错误体不写入日志或任务结果。登录接口可以返回本次新建的会话 token；普通查询不回显部署密钥和模型 API Key；只有用户在位置弹框确认跨位置操作后，允许调用经认证的 transfer 接口传递执行/复制所需凭据，页面不得显示或记录它们。
 - 测试使用本地模拟服务，不调用真实模型、不自动消费供应商额度。
 - `make test` 运行 Go 测试和 TypeScript 检查；`make build` 构建 `bin/server` 与 `web/dist`。涉及异步存储时使用 `go test -race ./... -timeout=30s`。
 

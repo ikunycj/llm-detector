@@ -82,6 +82,20 @@ func (d *Database) Login(username, password string, ttl time.Duration) (User, st
 	if subtle.ConstantTimeCompare(candidate, stored.Hash) != 1 || user.ID == 0 {
 		return User{}, "", time.Time{}, ErrCredentials
 	}
+	return d.createSession(user, ttl)
+}
+
+// SessionForAccount is called only after the server verifies its configured login key.
+// The account comes from server configuration, never from the login request.
+func (d *Database) SessionForAccount(username string, ttl time.Duration) (User, string, time.Time, error) {
+	var user User
+	if err := d.sql.QueryRow("SELECT id,username FROM users WHERE username=?", strings.ToLower(strings.TrimSpace(username))).Scan(&user.ID, &user.Username); err != nil {
+		return User{}, "", time.Time{}, err
+	}
+	return d.createSession(user, ttl)
+}
+
+func (d *Database) createSession(user User, ttl time.Duration) (User, string, time.Time, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
 		return User{}, "", time.Time{}, err

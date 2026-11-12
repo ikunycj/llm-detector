@@ -9,6 +9,26 @@ import (
 )
 
 func (s *Server) inspectionRoutes(mux *http.ServeMux, jobs *inspection.Service) {
+	mux.Handle("POST /api/v1/inspection/projects/{id}/transfer", s.protect(func(w http.ResponseWriter, r *http.Request) {
+		item, err := jobs.Export(r.PathValue("id"))
+		if err != nil {
+			inspectionError(w, err)
+			return
+		}
+		writeJSON(w, 200, item)
+	}))
+	mux.Handle("POST /api/v1/inspection/projects/import", s.protect(func(w http.ResponseWriter, r *http.Request) {
+		var input inspection.Transfer
+		if !decode(w, r, &input) {
+			return
+		}
+		item, err := jobs.Import(input)
+		if err != nil {
+			inspectionError(w, err)
+			return
+		}
+		writeJSON(w, 201, item)
+	}))
 	mux.Handle("GET /api/v1/inspection/projects", s.protect(func(w http.ResponseWriter, r *http.Request) {
 		items, err := jobs.List()
 		if err != nil {

@@ -6,7 +6,7 @@ if not path.exists():
     path.write_text(Path('.env.example').read_text())
 text = path.read_text()
 values = dict(line.split('=', 1) for line in text.splitlines() if '=' in line and not line.lstrip().startswith('#'))
-for key, default in [('CLOUD_ADMIN_USERNAME', 'admin'), ('CLOUD_ADMIN_PASSWORD', secrets.token_urlsafe(32))]:
+for key, default in [('APP_LOGIN_KEY', secrets.token_urlsafe(32)), ('CLOUD_ADMIN_USERNAME', 'admin'), ('CLOUD_ADMIN_PASSWORD', secrets.token_urlsafe(32))]:
     if not values.get(key) or values[key].startswith('replace-'):
         lines = text.splitlines()
         entry = f'{key}={default}'
@@ -17,4 +17,4 @@ for key, default in [('CLOUD_ADMIN_USERNAME', 'admin'), ('CLOUD_ADMIN_PASSWORD',
         text = '\n'.join(lines) + '\n'
 path.write_text(text)
 path.chmod(0o600)
-print('Cloud account bootstrap is configured in .env; credentials are not printed.')
+print('Cloud login key and data account are configured in .env; credentials are not printed.')

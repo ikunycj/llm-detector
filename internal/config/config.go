@@ -14,6 +14,7 @@ type Config struct {
 	TerminalBenchBinary       string
 	Addr                      string
 	CloudAdminUsername        string
+	CloudLoginKey             string
 	CloudAdminPassword        string
 	SessionTTL                time.Duration
 	RequestTimeout            time.Duration
@@ -37,6 +38,7 @@ func Load() (Config, error) {
 		TerminalBenchBinary:   env(values, "TERMINAL_BENCH_BINARY", "extensions/terminal-bench/.venv/bin/harbor"),
 		Addr:                  env(values, "HTTP_ADDR", "127.0.0.1:9001"),
 		CloudAdminUsername:    values["CLOUD_ADMIN_USERNAME"],
+		CloudLoginKey:         values["APP_LOGIN_KEY"],
 		CloudAdminPassword:    values["CLOUD_ADMIN_PASSWORD"],
 		WebDist:               env(values, "WEB_DIST_DIR", ""),
 		FingerprintDataSource: env(values, "FINGERPRINT_DATA_SOURCE", ""),

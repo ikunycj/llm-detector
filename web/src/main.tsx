@@ -12,7 +12,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, BoundaryState>
   componentDidCatch(error: Error, info: ErrorInfo) { console.error('LLM Detector 页面渲染失败', error, info) }
   render() {
     if (!this.state.error) return this.props.children
-    return <Result status="error" title="页面渲染失败" subTitle="当前浏览器中的一条配置或历史记录无法显示。刷新后会清理失效记录并回到本地模式。" extra={<Space orientation="vertical" align="center"><Button type="primary" onClick={() => window.location.reload()}>刷新页面</Button><Alert type="error" showIcon message={this.state.error.message || '未知渲染错误'} /></Space>} />
+    return <Result status="error" title="页面渲染失败" subTitle="页面出现渲染错误。请刷新重试；浏览器、云端和 Worker 中的已保存数据不会因刷新而删除。" extra={<Space orientation="vertical" align="center"><Button type="primary" onClick={() => window.location.reload()}>刷新页面</Button><Alert type="error" showIcon message={this.state.error.message || '未知渲染错误'} /></Space>} />
   }
 }
 
