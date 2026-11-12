@@ -124,7 +124,7 @@ export default function FingerprintPage({ onOpenLogs }: LogNavigation) {
         {samples.length ? samples.map((sample, index) => <FingerprintSampleCard key={`${selectedID || 'new'}:${sample.challenge_id}:${index}`} sample={sample} index={index} />) : <Alert type="info" showIcon title="此历史任务没有样本数据" description="点击“换一组提示词”开始新一轮。" />}
       </div>
       {scanError && <Alert type="error" showIcon title={scanError} />}
-      <div className="fingerprint-round-actions"><Text type="secondary">{active ? '正在取样与分析，云端 / Worker 的回复会在任务完成后显示。' : '三条提示词独立取样；仅在点击开始后调用模型。'}</Text><Space wrap>
+      <div className="fingerprint-round-actions"><Text type="secondary">{active ? '正在取样与分析，云端 的回复会在任务完成后显示。' : '三条提示词独立取样；仅在点击开始后调用模型。'}</Text><Space wrap>
         <Button icon={<ReloadOutlined />} disabled={Boolean(active)} onClick={newChallenges}>换一组提示词</Button>
         <Button type="primary" icon={<PlayCircleOutlined />} loading={busy} disabled={!engine || !service || Boolean(active)} onClick={() => { if (!model?.trim()) setConfigOpen(true); form.submit() }}>{active ? '取样中…' : '开始取样'}</Button>
       </Space></div>

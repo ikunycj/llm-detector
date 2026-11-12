@@ -1,5 +1,5 @@
-import { ApiOutlined, CloudOutlined, DesktopOutlined, LogoutOutlined } from '@ant-design/icons'
-import { Alert, Button, Layout, Segmented, Space, Tag, Typography } from 'antd'
+import { UserOutlined } from '@ant-design/icons'
+import { Button, Layout, Segmented, Space, Typography } from 'antd'
 import { useState } from 'react'
 import { LocationsProvider, useLocations } from './app/Locations'
 import Workbench from './features/scans/Workbench'
@@ -17,17 +17,17 @@ export default function App() {
 }
 function Workspace() {
   const [page, setPage] = useState<AppPage>('scan')
-  const [error, setError] = useState('')
   const [logTarget, setLogTarget] = useState<LogTarget>()
   function openLogs(target?: LogTarget) { setLogTarget(target); setPage('logs') }
-  const { session, signIn, signOut, openWorkers, openLocal } = useLocations()
+  const { session, saveLocation, setSaveLocation, openAccount } = useLocations()
   return (
     <Layout className="app-layout">
       <Layout.Header className="app-header unified-header">
         <Space className="brand">
-          <span className="brand-mark">L</span>
+          <img className="brand-logo" src="/llm-detector-logo.png" alt="LLM Detector 机器人标志" />
           <Typography.Text strong>LLM Detector</Typography.Text>
         </Space>
+        <div className="header-center">
         <Segmented
           aria-label="主导航"
           value={page}
@@ -39,32 +39,20 @@ function Workspace() {
             { label: '巡检日志', value: 'logs' },
           ]}
         />
-        <Space wrap>
-          <Button icon={<DesktopOutlined />} onClick={openLocal}>
-            本机 Worker
-          </Button>
-          <Button icon={<ApiOutlined />} onClick={openWorkers}>
-            自建worker
-          </Button>
-          {session ? (
-            <>
-              <Tag color="blue">{session.user.username}</Tag>
-              <Button
-                type="text"
-                icon={<LogoutOutlined />}
-                onClick={() => void signOut().catch((err) => setError(err.message))}
-              >
-                退出
-              </Button>
-            </>
-          ) : (
-            <Button icon={<CloudOutlined />} onClick={signIn}>
-              登录云端
-            </Button>
-          )}
-        </Space>
+        <div className="save-location-control">
+          <Typography.Text type="secondary">数据默认保存位置</Typography.Text>
+          <Segmented
+            aria-label="数据默认保存位置"
+            value={saveLocation}
+            onChange={setSaveLocation}
+            options={[{ label: '本地', value: 'local' }, { label: '云端', value: 'cloud' }]}
+          />
+        </div>
+        </div>
+        <Button icon={<UserOutlined />} onClick={openAccount} aria-label="个人中心">
+          {session ? `${session.user.username} · 个人中心` : '个人中心'}
+        </Button>
       </Layout.Header>
-      {error && <Alert type="error" title={error} closable onClose={() => setError('')} />}
       <div className="workspace-surface">
         {page === 'tasks' ? (
           <InspectionPage onOpenLogs={openLogs} />

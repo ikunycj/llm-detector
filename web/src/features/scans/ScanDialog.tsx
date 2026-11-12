@@ -121,7 +121,7 @@ export default function ScanDialog({
           </section>
         ))}
         <Typography.Paragraph type="secondary">
-          下一步选择本地、云端或自建 Worker。确认执行位置后才会发起请求，结果保存在执行位置。
+          下一步选择本地或云端。确认执行位置后才会发起请求，结果保存在执行位置。
         </Typography.Paragraph>
       </Form>
     </Modal>

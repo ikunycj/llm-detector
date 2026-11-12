@@ -21,7 +21,7 @@ export default function ModelAPIEditor({
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [models, setModels] = useState<string[]>([])
-  const { choose, owner, changed } = useLocations()
+  const { choose, owner, changed, saveLocation, label } = useLocations()
   useEffect(() => {
     if (open) {
       form.resetFields()
@@ -97,15 +97,15 @@ export default function ModelAPIEditor({
       destroyOnHidden
       extra={
         <Button type="primary" onClick={() => form.submit()} loading={busy}>
-          保存
+          保存到{label(saveLocation)}
         </Button>
       }
     >
       <Alert
         type="info"
         showIcon
-        title="保存时选择浏览器本地、云端或自建 Worker"
-        description="保存到其他位置会创建副本；本地配置只保存在当前浏览器。"
+        title={`将保存到${label(saveLocation)}`}
+        description="可在顶部切换默认保存位置。跨位置保存会创建副本，原配置保留；本地配置只保存在当前浏览器。"
       />
       {error && <Alert type="error" showIcon title={error} />}
       <Form name="model-api-editor" form={form} layout="vertical" onFinish={save} disabled={busy}>

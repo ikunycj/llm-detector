@@ -9,12 +9,11 @@ import (
 
 func TestConfiguration(t *testing.T) {
 	t.Chdir(t.TempDir())
-	if err := os.WriteFile(".env", []byte("APP_LOGIN_KEY='fixture-file-key'\nCLOUD_ADMIN_USERNAME=admin\nCLOUD_ADMIN_PASSWORD='fixture-file-password'\nSESSION_TTL=2h\nREQUEST_TIMEOUT=15s\n"), 0600); err != nil {
+	if err := os.WriteFile(".env", []byte("CLOUD_ADMIN_USERNAME=admin\nCLOUD_ADMIN_PASSWORD='fixture-file-password'\nSESSION_TTL=2h\nREQUEST_TIMEOUT=15s\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// Inherited command-line keys must not replace the key selected in .env.
+	// Inherited bootstrap passwords must not replace the password selected in .env.
 	t.Setenv("CLOUD_ADMIN_PASSWORD", "fixture-process-password")
-	t.Setenv("APP_LOGIN_KEY", "fixture-process-key")
 	for _, key := range []string{"HTTP_ADDR", "SESSION_TTL", "REQUEST_TIMEOUT", "FINGERPRINT_REQUEST_TIMEOUT", "WEB_DIST_DIR"} {
 		t.Setenv(key, "")
 	}
@@ -22,8 +21,8 @@ func TestConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.CloudAdminPassword != "fixture-file-password" || cfg.CloudLoginKey != "fixture-file-key" {
-		t.Fatal("login key did not come from .env")
+	if cfg.CloudAdminPassword != "fixture-file-password" {
+		t.Fatal("bootstrap password did not come from .env")
 	}
 	if cfg.Addr != "127.0.0.1:9001" || cfg.SessionTTL != 2*time.Hour || cfg.RequestTimeout != 15*time.Second {
 		t.Fatal("file values or defaults were not applied")

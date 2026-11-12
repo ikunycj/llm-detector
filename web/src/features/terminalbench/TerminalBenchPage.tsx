@@ -147,7 +147,7 @@ export default function TerminalBenchPage({ onOpenLogs }: LogNavigation) {
               运行环境{' '}
               {checkedClient && (
                 <SourceTag
-                  source={checkedClient.mode === 'worker' ? `worker:${checkedClient.id}` : checkedClient.mode}
+                  source={checkedClient.mode}
                 />
               )}
             </Space>
@@ -181,7 +181,7 @@ export default function TerminalBenchPage({ onOpenLogs }: LogNavigation) {
                 .catch((err) => setError(err.message))
             }
           >
-            安装该 Worker 的 Python / Harbor
+            安装所选执行位置的 Python / Harbor
           </Button>
         )}
         <Row gutter={[20, 20]} className="terminal-bench-grid">

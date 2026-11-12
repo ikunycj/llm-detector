@@ -10,9 +10,10 @@ import (
 	"errors"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 type User struct {
@@ -25,14 +26,16 @@ type passwordHash struct {
 }
 
 var ErrCredentials = errors.New("账号或密码不正确")
+var ErrAccountInput = errors.New("账号和密码不能为空；账号不超过 128 字节，密码不超过 256 字节")
+var ErrAccountExists = errors.New("账号已存在，请直接登录或使用其他账号")
 
 func passwordKey(password string, salt []byte) []byte {
 	return argon2.IDKey([]byte(password), salt, 2, 19*1024, 1, 32)
 }
 func (d *Database) CreateUser(username, password string) (User, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
-	if utf8.RuneCountInString(username) < 3 || len(username) > 128 || strings.ContainsAny(username, "\r\n\x00") || len(password) == 0 || len(password) > 256 {
-		return User{}, errors.New("账号至少 3 个字符，密码不能为空且不超过 256 字节")
+	if username == "" || len(username) > 128 || strings.ContainsAny(username, "\r\n\x00") || len(password) == 0 || len(password) > 256 {
+		return User{}, ErrAccountInput
 	}
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
@@ -44,7 +47,11 @@ func (d *Database) CreateUser(username, password string) (User, error) {
 	}
 	result, err := d.sql.Exec("INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?)", username, string(encoded), time.Now().Unix())
 	if err != nil {
-		return User{}, errors.New("账号创建失败，请确认账号没有重复")
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return User{}, ErrAccountExists
+		}
+		return User{}, err
 	}
 	id, err := result.LastInsertId()
 	return User{ID: id, Username: username}, err
@@ -81,16 +88,6 @@ func (d *Database) Login(username, password string, ttl time.Duration) (User, st
 	candidate := passwordKey(password, stored.Salt)
 	if subtle.ConstantTimeCompare(candidate, stored.Hash) != 1 || user.ID == 0 {
 		return User{}, "", time.Time{}, ErrCredentials
-	}
-	return d.createSession(user, ttl)
-}
-
-// SessionForAccount is called only after the server verifies its configured login key.
-// The account comes from server configuration, never from the login request.
-func (d *Database) SessionForAccount(username string, ttl time.Duration) (User, string, time.Time, error) {
-	var user User
-	if err := d.sql.QueryRow("SELECT id,username FROM users WHERE username=?", strings.ToLower(strings.TrimSpace(username))).Scan(&user.ID, &user.Username); err != nil {
-		return User{}, "", time.Time{}, err
 	}
 	return d.createSession(user, ttl)
 }

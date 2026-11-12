@@ -23,7 +23,7 @@ button, input, select, textarea { font: inherit; }
 .app-header { display: flex; align-items: center; justify-content: space-between; height: 64px; padding-inline: max(24px, calc((100vw - 1160px) / 2)); border-bottom: 1px solid var(--app-border); }
 .app-header .ant-btn { flex: none; }
 .brand { min-width: 0; }
-.brand-mark { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border-radius: 7px; background: var(--app-primary); color: #fff; font-weight: 750; }
+.brand-logo { display: block; flex: none; width: 44px; height: 44px; object-fit: contain; }
 .app-content { width: min(1160px, calc(100% - 48px)); margin: 0 auto; padding: 34px 0 20px; }
 .page-heading { margin-bottom: 24px; }
 .page-heading .ant-typography-secondary { display: block; margin-top: 6px; }
@@ -173,9 +173,10 @@ button, input, select, textarea { font: inherit; }
 .destination-options { display: flex; flex-direction: column; gap: 18px; width: 100%; margin: 12px 0 24px; }
 .destination-options .ant-radio-wrapper { align-items: flex-start; }
 .destination-note { margin-top: 16px; }
-.worker-install-links { margin: 16px 0; }
+.header-center { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 16px 24px; }
+.save-location-control { display: flex; align-items: center; gap: 10px; }
 .source-load-errors { margin-bottom: 16px; }
-@media (max-width: 760px) { .unified-header { padding: 12px; } .unified-header > .ant-segmented { order: 3; width: 100%; } }
+@media (max-width: 760px) { .unified-header { padding: 12px; } .unified-header > .header-center { order: 3; width: 100%; } }
 
 /* Fingerprint workspace: one API strip, followed by three equal sample panels. */
 .fingerprint-workbench { --fp-line: oklch(0.88 0.008 270); }

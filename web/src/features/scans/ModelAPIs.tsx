@@ -16,11 +16,11 @@ export default function ModelAPIs({
   onInspect: (service: SavedModelService) => void
 }) {
   const { items, errors, loading, setItems } = useSourceData(load)
-  const { choose, owner, changed, clients, label } = useLocations()
+  const { choose, owner, changed, saveLocation, label } = useLocations()
   const [name, setName] = useState('')
   const [url, setURL] = useState('')
   const [protocol, setProtocol] = useState<SavedModelService['protocol']>()
-  const [source, setSource] = useState<SourceID | 'worker'>()
+  const [source, setSource] = useState<SourceID>()
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 })
   const [editor, setEditor] = useState<{ service?: SavedModelService }>()
   const [importing, setImporting] = useState(false)
@@ -30,7 +30,7 @@ export default function ModelAPIs({
     item.name.toLocaleLowerCase().includes(name.trim().toLocaleLowerCase()) &&
     item.base_url.toLocaleLowerCase().includes(url.trim().toLocaleLowerCase()) &&
     (!protocol || item.protocol === protocol) &&
-    (!source || (source === 'worker' ? item.source.startsWith('worker:') : item.source === source)),
+    (!source || item.source === source),
   )
   const current = Math.min(pagination.current, Math.max(1, Math.ceil(filtered.length / pagination.pageSize)))
   const hasFilters = Boolean(name || url || protocol || source)
@@ -89,7 +89,7 @@ export default function ModelAPIs({
           type="info"
           showIcon
           title="所有位置的模型 API 统一展示"
-          description="来源标明存储位置。本地配置只保存在当前浏览器；保存与执行时分别选择位置。"
+          description={`当前默认保存到${label(saveLocation)}。本地配置仅保存在当前浏览器；登录不会自动上传已有数据。`}
         />
         {errors.map((message) => (
           <Alert key={message} type="warning" showIcon title={message} />
@@ -134,10 +134,6 @@ export default function ModelAPIs({
               options={[
                 { value: 'local', label: '浏览器本地' },
                 { value: 'cloud', label: '云端' },
-                { value: 'worker', label: '全部自建 Worker' },
-                ...clients.filter((client) => client.mode === 'worker').map((client) => ({
-                  value: sourceID(client), label: label(sourceID(client)),
-                })),
               ]}
             />
           </Form.Item>
@@ -248,7 +244,7 @@ export default function ModelAPIs({
           </Button>
         }
       >
-        <Typography.Paragraph>粘贴 JSON 数组。确认后选择保存位置，追加配置。</Typography.Paragraph>
+        <Typography.Paragraph>粘贴 JSON 数组，保存后追加到{label(saveLocation)}。可在顶部切换默认保存位置。</Typography.Paragraph>
         <Input.TextArea
           rows={16}
           value={text}

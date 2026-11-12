@@ -14,7 +14,6 @@ type Config struct {
 	TerminalBenchBinary       string
 	Addr                      string
 	CloudAdminUsername        string
-	CloudLoginKey             string
 	CloudAdminPassword        string
 	SessionTTL                time.Duration
 	RequestTimeout            time.Duration
@@ -38,7 +37,6 @@ func Load() (Config, error) {
 		TerminalBenchBinary:   env(values, "TERMINAL_BENCH_BINARY", "extensions/terminal-bench/.venv/bin/harbor"),
 		Addr:                  env(values, "HTTP_ADDR", "127.0.0.1:9001"),
 		CloudAdminUsername:    values["CLOUD_ADMIN_USERNAME"],
-		CloudLoginKey:         values["APP_LOGIN_KEY"],
 		CloudAdminPassword:    values["CLOUD_ADMIN_PASSWORD"],
 		WebDist:               env(values, "WEB_DIST_DIR", ""),
 		FingerprintDataSource: env(values, "FINGERPRINT_DATA_SOURCE", ""),
@@ -59,8 +57,8 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// Operational settings may be overridden by the process environment. The login
-// key deliberately bypasses this helper so every startup uses the same .env key.
+// Operational settings may be overridden by the process environment. Bootstrap
+// account credentials are read directly from .env and only apply to a new database.
 func env(values map[string]string, key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

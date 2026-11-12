@@ -27,11 +27,11 @@ export class ApiError extends Error {
   }
 }
 export async function request<T>(path: string, client: APIClient, options: RequestInit = {}): Promise<T> {
-  if (client.mode === 'local' && !client.token) throw new ApiError(428, '请先连接本机 Worker。', 'local')
+  if (client.mode === 'local' && !client.token) throw new ApiError(428, '请先连接本机执行器。', 'local')
   const headers = new Headers(options.headers)
   if (options.body) headers.set('Content-Type', 'application/json')
   if (client.token) headers.set('Authorization', `Bearer ${client.token}`)
-  const base = client.mode === 'local' ? localBase : client.mode === 'worker' ? client.baseURL : ''
+  const base = client.mode === 'local' ? localBase : ''
   const signal =
     options.method && options.method !== 'GET'
       ? options.signal
@@ -54,8 +54,10 @@ export async function request<T>(path: string, client: APIClient, options: Reque
   return payload as T
 }
 const publicCloud: APIClient = { mode: 'cloud', token: '' }
-export const login = (key: string) =>
-  request<CloudSession>('/auth/login', publicCloud, { method: 'POST', body: JSON.stringify({ key }) })
+export const login = (username: string, password: string) =>
+  request<CloudSession>('/auth/login', publicCloud, { method: 'POST', body: JSON.stringify({ username, password }) })
+export const register = (username: string, password: string) =>
+  request<CloudSession>('/auth/register', publicCloud, { method: 'POST', body: JSON.stringify({ username, password }) })
 export const logout = (client: APIClient) => request<void>('/auth/logout', client, { method: 'POST' })
 export const getUser = (client: APIClient) => request<User>('/auth/me', client)
 export const getCatalog = (signal?: AbortSignal) =>
@@ -68,12 +70,6 @@ export const getEvaluators = (_client: APIClient, signal: AbortSignal) =>
   getCatalog(signal).then((c) => ({ evaluators: c.evaluators }))
 export const getBenchCatalog = (_client: APIClient, signal?: AbortSignal) =>
   getCatalog(signal).then((c) => c.terminal_bench)
-export async function checkWorker(client: APIClient) {
-  const info = await request<{ protocol_version: number }>('/worker/info', client, {
-    signal: AbortSignal.timeout(8000),
-  })
-  if (info.protocol_version !== 1) throw new Error('该地址不是支持当前协议的 LLM Detector Worker')
-}
 export async function probeLocalRuntime() {
   try {
     return (await fetch(`${localBase}/healthz`, { signal: AbortSignal.timeout(2000) })).ok
@@ -90,7 +86,7 @@ export async function connectLocal() {
     signal: AbortSignal.timeout(10000),
   })
   const result = await response.json()
-  if (!response.ok) throw new Error(result.error || '本机 Worker 连接失败')
+  if (!response.ok) throw new Error(result.error || '本机执行器 连接失败')
   return result as { token: string }
 }
 export const dependencyState = (client: APIClient) =>
@@ -328,7 +324,7 @@ export async function saveInspectionProject(client: APIClient, input: ProjectInp
   if (client.mode === 'local' && !client.token) {
     const state = await localProjectState()
     const previous = id ? state.projects[id] : undefined
-    if (input.user_id <= 0) throw new Error('账号解析需要本机 Worker，或在高级配置中填写 User ID')
+    if (input.user_id <= 0) throw new Error('账号解析需要本机执行器，或在高级配置中填写 User ID')
     const access_token = input.access_token || previous?.access_token || ''
     if (!input.name.trim() || !access_token.trim()) throw new Error('请填写项目名称和管理员 Access Token')
     const url = new URL(input.base_url)
@@ -397,7 +393,7 @@ export const importInspectionKeys = (client: APIClient, id: string, channel_ids:
   })
 export async function saveInspectionPlan(client: APIClient, id: string, input: InspectionPlan) {
   if (client.mode === 'local' && input.enabled)
-    throw new Error('浏览器本地不支持离线定时巡检，请关闭定时或保存到云端 / 自建 Worker')
+    throw new Error('浏览器本地不支持离线定时巡检，请关闭定时或保存到云端')
   if (client.mode === 'local' && !client.token) {
     const state = await localProjectState()
     const item = state.projects[id]

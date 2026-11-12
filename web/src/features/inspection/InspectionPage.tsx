@@ -221,7 +221,7 @@ export default function InspectionPage({ onOpenLogs }: LogNavigation) {
       const client = await choose({ action: 'save', title: '巡检设置保存到哪里？', from: settings.source })
       if (!client) return
       if (client.mode === 'local' && values.enabled)
-        throw new Error('浏览器无法离线调度，请关闭定时或选择云端 / 自建 Worker')
+        throw new Error('浏览器无法离线调度，请关闭定时或选择云端')
       const copied = await copyProject(owner(settings.source), settings, client)
       await saveInspectionPlan(client, copied.id, values)
       setSelected(recordKey({ ...copied, source: sourceID(client) }))
@@ -575,7 +575,7 @@ export default function InspectionPage({ onOpenLogs }: LogNavigation) {
           <Alert
             type="info"
             title="保存时选择存储位置"
-            description="账号解析需要访问 New API；选择浏览器本地时由本机 Worker 完成。密码和验证码不保存。"
+            description="账号解析需要访问 New API；选择浏览器本地时由本机执行器 完成。密码和验证码不保存。"
           />
         </Form>
       </Drawer>
@@ -629,7 +629,7 @@ export default function InspectionPage({ onOpenLogs }: LogNavigation) {
           <Form.Item name="interval_minutes" label="执行间隔（分钟）">
             <InputNumber min={1} max={10080} />
           </Form.Item>
-          <Form.Item name="enabled" label="启用定时巡检（云端或自建 Worker）" valuePropName="checked">
+          <Form.Item name="enabled" label="启用定时巡检（云端）" valuePropName="checked">
             <Switch />
           </Form.Item>
           <Button type="primary" htmlType="submit" icon={<CalendarOutlined />}>

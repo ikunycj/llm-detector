@@ -3,8 +3,6 @@ package cloud
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -94,17 +92,13 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	}
 	return true
 }
-func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Key string `json:"key"`
-	}
-	if !decode(w, r, &input) {
-		return
-	}
-	if len(input.Key) > 256 {
-		failure(w, 400, "访问密钥过长")
-		return
-	}
+
+type credentials struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func (s *Server) allowAuthentication(w http.ResponseWriter, r *http.Request) bool {
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	now := time.Now()
 	s.mu.Lock()
@@ -116,23 +110,64 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(attempts) >= 10 {
 		s.mu.Unlock()
-		failure(w, 429, "登录尝试过于频繁，请稍后再试")
-		return
+		failure(w, 429, "注册或登录过于频繁，请稍后再试")
+		return false
 	}
 	s.attempts[host] = append(attempts, now)
 	s.mu.Unlock()
-	expected := sha256.Sum256([]byte(s.cfg.CloudLoginKey))
-	supplied := sha256.Sum256([]byte(input.Key))
-	if s.cfg.CloudLoginKey == "" || input.Key == "" || subtle.ConstantTimeCompare(expected[:], supplied[:]) != 1 {
-		failure(w, 401, "云端访问密钥不正确")
+	return true
+}
+
+func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
+	if !s.allowAuthentication(w, r) {
 		return
 	}
-	user, token, expiry, err := s.db.SessionForAccount(s.cfg.CloudAdminUsername, s.cfg.SessionTTL)
+	var input credentials
+	if !decode(w, r, &input) {
+		return
+	}
+	if len(input.Username) > 128 || len(input.Password) > 256 {
+		failure(w, 400, "账号或密码过长")
+		return
+	}
+	user, token, expiry, err := s.db.Login(input.Username, input.Password, s.cfg.SessionTTL)
 	if err != nil {
-		failure(w, 500, "登录服务不可用")
+		if errors.Is(err, ErrCredentials) {
+			failure(w, 401, ErrCredentials.Error())
+		} else {
+			failure(w, 500, "登录服务不可用")
+		}
 		return
 	}
 	respond(w, 200, map[string]any{"user": user, "token": token, "expires_at": expiry})
+}
+
+func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
+	if !s.allowAuthentication(w, r) {
+		return
+	}
+	var input credentials
+	if !decode(w, r, &input) {
+		return
+	}
+	user, err := s.db.CreateUser(input.Username, input.Password)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAccountInput):
+			failure(w, 400, err.Error())
+		case errors.Is(err, ErrAccountExists):
+			failure(w, 409, err.Error())
+		default:
+			failure(w, 500, "注册服务不可用")
+		}
+		return
+	}
+	user, token, expiry, err := s.db.createSession(user, s.cfg.SessionTTL)
+	if err != nil {
+		failure(w, 500, "账号已创建，但会话创建失败，请使用账号密码登录")
+		return
+	}
+	respond(w, 201, map[string]any{"user": user, "token": token, "expires_at": expiry})
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	user, err := s.db.Authenticate(r.Header.Get("Authorization"))

@@ -9,10 +9,10 @@ export type Locations = {
   choose: (choice: LocationChoice) => Promise<APIClient | null>
   owner: (source?: SourceID) => APIClient
   ensure: (client: APIClient, runner?: boolean) => Promise<APIClient | null>
-  openWorkers: () => void
+  saveLocation: SourceID
+  setSaveLocation: (source: SourceID) => void
+  openAccount: () => void
   openLocal: () => void
-  signIn: () => void
-  signOut: () => Promise<void>
   revision: number
   changed: () => void
   label: (source?: SourceID) => string

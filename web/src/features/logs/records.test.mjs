@@ -10,10 +10,10 @@ const batch = (overrides = {}) => ({ id: 'batch-1', source: 'local', project_id:
 const channel = (overrides = {}) => ({ channel_id: 'channel-1', channel_name: '渠道甲', groups: ['default'], models: ['model-a'], evaluator: 'fingerprint', status: 'completed', ...overrides })
 
 test('a fingerprint scan is listed once and equal IDs from different locations stay distinct', () => {
-  const entries = mergeLogs(['local', 'cloud', 'worker:a', 'worker:b'].map((source) => scan({ source })), [], [])
-  assert.equal(entries.length, 4)
-  assert.equal(new Set(entries.map((entry) => entry.key)).size, 4)
-  assert.equal(filterLogs(entries, { query: '', source: 'worker:a' }).length, 1)
+  const entries = mergeLogs(['local', 'cloud'].map((source) => scan({ source })), [], [])
+  assert.equal(entries.length, 2)
+  assert.equal(new Set(entries.map((entry) => entry.key)).size, 2)
+  assert.equal(filterLogs(entries, { query: '', source: 'cloud' }).length, 1)
 })
 
 test('batch, child scans and nested Bench jobs are grouped using source and explicit IDs', () => {
@@ -43,9 +43,9 @@ test('pending scans and failed batches without model results remain visible', ()
 })
 
 test('filters combine model names, project/channel names, engines, type, status and location', () => {
-  const entries = mergeLogs([scan()], [batch({ source: 'worker:a', items: [channel({ evaluator: 'future-engine' })] })], [job()])
+  const entries = mergeLogs([scan()], [batch({ source: 'cloud', items: [channel({ evaluator: 'future-engine' })] })], [job()])
   assert.equal(filterLogs(entries, { query: 'display MODEL-A' }).length, 1)
-  assert.equal(filterLogs(entries, { query: '渠道甲', kind: 'batch', engine: 'future-engine', source: 'worker:a', status: 'completed', service: 'New API' }).length, 1)
+  assert.equal(filterLogs(entries, { query: '渠道甲', kind: 'batch', engine: 'future-engine', source: 'cloud', status: 'completed', service: 'New API' }).length, 1)
   assert.equal(filterLogs(entries, { query: 'model-a', kind: 'batch', engine: 'fingerprint' }).length, 0)
   assert.equal(filterLogs(entries, { query: 'job-1' })[0].kind, 'bench')
 })

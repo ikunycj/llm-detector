@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -27,10 +26,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	cfg.CloudAdminUsername = strings.ToLower(strings.TrimSpace(cfg.CloudAdminUsername))
-	if cfg.CloudLoginKey == "" {
-		return errors.New("请在 .env 配置 APP_LOGIN_KEY，或运行 make init-env")
-	}
 	if cfg.WebDist != "" {
 		if _, err := os.Stat(filepath.Join(cfg.WebDist, "index.html")); err != nil {
 			return errors.New("WEB_DIST_DIR must contain a built index.html")
@@ -47,26 +42,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if len(users) == 0 {
+	if len(users) == 0 && (cfg.CloudAdminUsername != "" || cfg.CloudAdminPassword != "") {
 		if _, err = db.CreateUser(cfg.CloudAdminUsername, cfg.CloudAdminPassword); err != nil {
 			return errors.New("请在 .env 配置 CLOUD_ADMIN_USERNAME 和 CLOUD_ADMIN_PASSWORD，或运行 make init-env")
 		}
-	}
-	// Existing deployments keep their account IDs and data. Reject a mistyped owner
-	// instead of authenticating a key into a different or empty workspace.
-	users, err = db.Users()
-	if err != nil {
-		return err
-	}
-	found := false
-	for _, user := range users {
-		if user.Username == cfg.CloudAdminUsername {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return errors.New("CLOUD_ADMIN_USERNAME 必须指向已有的云端数据账号")
 	}
 	backend, err := cloud.NewServer(ctx, cfg, db)
 	if err != nil {
@@ -80,6 +59,7 @@ func run() error {
 	})
 	mux.HandleFunc("GET /api/v1/catalog", application.Catalog)
 	mux.HandleFunc("POST /api/v1/auth/login", backend.Login)
+	mux.HandleFunc("POST /api/v1/auth/register", backend.Register)
 	mux.Handle("/api/v1/", backend)
 	mux.Handle("/downloads/", application.Downloads("dist/local-runner"))
 	if cfg.WebDist != "" {
